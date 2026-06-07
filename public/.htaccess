@@ -1,0 +1,12 @@
+RewriteEngine On
+
+# Existierende Dateien und Verzeichnisse direkt ausliefern (Assets etc.)
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# /api/* → api.php (REQUEST_URI bleibt erhalten, Router liest ihn aus)
+RewriteRule ^api(/.*)?$ api.php [L,QSA]
+
+# Alle anderen Anfragen → index.php
+RewriteRule ^ index.php [L]
