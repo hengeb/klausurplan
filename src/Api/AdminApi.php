@@ -5,9 +5,7 @@ declare(strict_types=1);
 namespace Klausurplan\Api;
 
 use Klausurplan\Auth\MoodleApi;
-use Klausurplan\Auth\Session;
 use Klausurplan\Models\Database;
-use PDO;
 use RuntimeException;
 
 class AdminApi
@@ -38,12 +36,20 @@ class AdminApi
 
     public static function setRollen(int $benutzerId, array $rollen): array
     {
+        $db = Database::getInstance();
+
+        $exists = $db->prepare('SELECT 1 FROM benutzer WHERE id = ?');
+        $exists->execute([$benutzerId]);
+        if ($exists->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Benutzer*in mit ID $benutzerId nicht gefunden.");
+        }
+
         $erlaubteRollen = ['admin', 'stufenleitung', 'lehrkraft', 'schueler'];
         $rollen = array_values(array_unique(
             array_filter($rollen, static fn ($r) => in_array($r, $erlaubteRollen, true))
         ));
 
-        $db = Database::getInstance();
         $db->prepare('DELETE FROM rollen WHERE benutzer_id = ?')->execute([$benutzerId]);
 
         if (!empty($rollen)) {

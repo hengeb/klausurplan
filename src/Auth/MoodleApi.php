@@ -89,7 +89,7 @@ class MoodleApi
                 'criteria[0][value]'   => $auth,
             ];
 
-            $url  = $this->baseUrl . '/webservices/rest/server.php?' . http_build_query($params);
+            $url  = $this->baseUrl . '/webservice/rest/server.php?' . http_build_query($params);
             $data = $this->get($url);
 
             if (!empty($data['exception'])) {

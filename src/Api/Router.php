@@ -71,6 +71,13 @@ class Router
             } catch (\JsonException $e) {
                 http_response_code(500);
                 echo json_encode(['fehler' => 'JSON-Serialisierungsfehler']);
+            } catch (\RuntimeException $e) {
+                http_response_code(400);
+                echo json_encode(['fehler' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            } catch (\Throwable $e) {
+                http_response_code(500);
+                error_log('API-Fehler: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+                echo json_encode(['fehler' => 'Interner Serverfehler'], JSON_UNESCAPED_UNICODE);
             }
 
             return;
