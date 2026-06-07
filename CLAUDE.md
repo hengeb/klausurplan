@@ -6,8 +6,8 @@ Dieses Tool verwaltet Klausurtermine an einer deutschen Schule (Oberstufe/Gymnas
 Es wird per **LTI 1.3** in Moodle eingebunden, läuft auf einem PHP-Schulserver und ist
 **datenschutzkonform** (kein externes CDN, keine Analytics, DSGVO).
 
-Die Authentifizierung erfolgt ausschließlich über Moodle/LTI. Das Tool hat optional
-Zugriff auf die Moodle REST API (Nutzerdaten, E-Mail-Adressen).
+Die Authentifizierung erfolgt ausschließlich über Moodle/LTI. Das Tool nutzt
+die Moodle REST API für den Nutzerdaten-Import (E-Mail-Adressen, Zuordnung).
 
 ---
 
@@ -395,7 +395,7 @@ Moodle speichert z.B. `Gebauer (GB)` → Regex: `/\(([A-ZÄÖÜa-zäöü]+)\)$/`
 
 ---
 
-## Moodle REST API (optional, Nutzerimport)
+## Moodle REST API
 
 Endpunkt: `{MOODLE_URL}/webservices/rest/server.php`
 
@@ -582,14 +582,9 @@ DB_NAME=klausurplan
 DB_USER=klausurplan_user
 DB_PASS=
 
-# LTI 1.3
-LTI_PLATFORM_ID=https://moodle.schule.de
-LTI_CLIENT_ID=
-LTI_DEPLOYMENT_ID=
-LTI_KEY_SET_URL=https://moodle.schule.de/mod/lti/certs.php
-LTI_AUTH_URL=https://moodle.schule.de/mod/lti/auth.php
-LTI_TOKEN_URL=https://moodle.schule.de/mod/lti/token.php
-LTI_PRIVATE_KEY_FILE=/var/klausurplan/private.key
+# LTI 1.3 – Plattformdaten stehen in der DB (Setup-Assistent /setup.php)
+LTI_PRIVATE_KEY_FILE=private.key
+LTI_KID=klausurplan-key-1
 
 # Moodle REST API
 MOODLE_URL=https://moodle.schule.de

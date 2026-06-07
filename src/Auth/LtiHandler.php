@@ -16,7 +16,7 @@ class LtiHandler extends Tool
     public function __construct()
     {
         $this->db = Database::getInstance();
-        $connector = DataConnector::getDataConnector($this->db, 'lti2_');
+        $connector = DataConnector::getDataConnector($this->db);
         parent::__construct($connector);
 
         $keyFile = self::resolveKeyPath($_ENV['LTI_PRIVATE_KEY_FILE'] ?? null);

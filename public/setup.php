@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Einmaliger Setup-Assistent (browserbasiert).
  *
  * Zugriff nur wenn SETUP_TOKEN in .env gesetzt ist.
- * URL: /setup?token=<SETUP_TOKEN>
+ * URL: /setup.php?token=<SETUP_TOKEN>
  *
  * Nach abgeschlossenem Setup SETUP_TOKEN aus .env entfernen.
  */
@@ -35,8 +35,9 @@ if (!hash_equals($setupToken, $tokenParam)) {
     exit('Ungültiger Token.');
 }
 
-$appUrl  = rtrim($_ENV['APP_URL'] ?? '', '/');
-$keyFile = LtiHandler::resolveKeyPath($_ENV['LTI_PRIVATE_KEY_FILE'] ?? null);
+$appUrl    = rtrim($_ENV['APP_URL'] ?? '', '/');
+$moodleUrl = rtrim($_ENV['MOODLE_URL'] ?? '', '/');
+$keyFile   = LtiHandler::resolveKeyPath($_ENV['LTI_PRIVATE_KEY_FILE'] ?? null);
 // Für die Anzeige: Pfad wie in .env angegeben (noch nicht aufgelöst)
 $keyFileRaw = $_ENV['LTI_PRIVATE_KEY_FILE'] ?? '';
 // Absoluten Zielpfad für das Schreiben berechnen (auch wenn Datei noch nicht existiert)
@@ -84,7 +85,7 @@ if ($aktion === 'plattform_registrieren') {
     } else {
         try {
             $db        = Database::getInstance();
-            $connector = DataConnector::getDataConnector($db, 'lti2_');
+            $connector = DataConnector::getDataConnector($db);
 
             $platform                    = new Platform($connector);
             $platform->name              = $name;
@@ -224,9 +225,20 @@ Nach Abschluss <strong>SETUP_TOKEN aus <code>.env</code> entfernen</strong>.</p>
         <input type="hidden" name="token" value="<?= h($tokenParam) ?>">
         <input type="hidden" name="aktion" value="plattform_registrieren">
 
+<?php
+$def = [
+    'platform_id' => $moodleUrl,
+    'key_set_url' => $moodleUrl ? $moodleUrl . '/mod/lti/certs.php' : '',
+    'token_url'   => $moodleUrl ? $moodleUrl . '/mod/lti/token.php' : '',
+    'auth_url'    => $moodleUrl ? $moodleUrl . '/mod/lti/auth.php'  : '',
+];
+function val(string $name, array $def): string {
+    return htmlspecialchars($_POST[$name] ?? $def[$name] ?? '', ENT_QUOTES);
+}
+?>
         <label>Plattform-ID (Issuer) *</label>
-        <input type="url" name="platform_id" required placeholder="https://moodle.schule.de"
-               value="<?= h($_POST['platform_id'] ?? '') ?>">
+        <input type="url" name="platform_id" required
+               value="<?= val('platform_id', $def) ?>">
 
         <label>Client-ID *</label>
         <input type="text" name="client_id" required placeholder="abc123"
@@ -236,16 +248,16 @@ Nach Abschluss <strong>SETUP_TOKEN aus <code>.env</code> entfernen</strong>.</p>
         <input type="text" name="deployment_id" required value="<?= h($_POST['deployment_id'] ?? '1') ?>">
 
         <label>Platform Keyset URL *</label>
-        <input type="url" name="key_set_url" required placeholder="https://moodle.schule.de/mod/lti/certs.php"
-               value="<?= h($_POST['key_set_url'] ?? '') ?>">
-
-        <label>Authentifizierungs-URL *</label>
-        <input type="url" name="auth_url" required placeholder="https://moodle.schule.de/mod/lti/auth.php"
-               value="<?= h($_POST['auth_url'] ?? '') ?>">
+        <input type="url" name="key_set_url" required
+               value="<?= val('key_set_url', $def) ?>">
 
         <label>Access-Token-URL *</label>
-        <input type="url" name="token_url" required placeholder="https://moodle.schule.de/mod/lti/token.php"
-               value="<?= h($_POST['token_url'] ?? '') ?>">
+        <input type="url" name="token_url" required
+               value="<?= val('token_url', $def) ?>">
+
+        <label>Authentifizierungs-URL *</label>
+        <input type="url" name="auth_url" required
+               value="<?= val('auth_url', $def) ?>">
 
         <label>Anzeigename</label>
         <input type="text" name="name" value="<?= h($_POST['name'] ?? 'Moodle') ?>">

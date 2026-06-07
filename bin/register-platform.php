@@ -46,7 +46,7 @@ if (empty($platformId) || empty($clientId) || empty($keySetUrl) || empty($authUr
 }
 
 $db        = Database::getInstance();
-$connector = DataConnector::getDataConnector($db, 'lti2_');
+$connector = DataConnector::getDataConnector($db);
 
 $platform                 = new Platform($connector);
 $platform->name           = $name;
