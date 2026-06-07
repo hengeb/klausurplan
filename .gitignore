@@ -1,0 +1,26 @@
+# Abhängigkeiten
+/vendor/
+
+# Umgebungsvariablen – niemals committen
+.env
+
+# Private Keys
+*.key
+*.pem
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Logs
+*.log
+/logs/
+
+# System
+.DS_Store
+Thumbs.db
+
+
+SchuelerLeistungsdaten.dat
