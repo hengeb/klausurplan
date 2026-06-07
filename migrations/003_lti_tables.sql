@@ -29,14 +29,10 @@ CREATE TABLE IF NOT EXISTS lti2_consumer (
   last_access date DEFAULT NULL,
   created datetime NOT NULL,
   updated datetime NOT NULL,
-  PRIMARY KEY (consumer_pk)
+  PRIMARY KEY (consumer_pk),
+  UNIQUE KEY lti2_consumer_consumer_key_UNIQUE (consumer_key),
+  UNIQUE KEY lti2_consumer_platform_UNIQUE (platform_id, client_id, deployment_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-ALTER TABLE lti2_consumer
-  ADD UNIQUE INDEX IF NOT EXISTS lti2_consumer_consumer_key_UNIQUE (consumer_key ASC);
-
-ALTER TABLE lti2_consumer
-  ADD UNIQUE INDEX IF NOT EXISTS lti2_consumer_platform_UNIQUE (platform_id ASC, client_id ASC, deployment_id ASC);
 
 CREATE TABLE IF NOT EXISTS lti2_nonce (
   consumer_pk int(11) NOT NULL,

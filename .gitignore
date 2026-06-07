@@ -4,7 +4,7 @@
 # Umgebungsvariablen – niemals committen
 .env
 
-# Private Keys
+# Keys
 *.key
 *.pem
 *.pub
