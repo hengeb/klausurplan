@@ -11,6 +11,9 @@ $dotenv->load();
 
 Session::start();
 
+// CSP senden – überschreibt ggf. eine restriktivere Server-Policy
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'self' https://moodle.gymnasium-broich.de");
+
 // Nicht eingeloggte Nutzer landen auf einer Hinweisseite
 if (!Session::isAuthenticated()) {
     http_response_code(401);

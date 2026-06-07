@@ -11,3 +11,11 @@ RewriteRule ^api(/.*)?$ api.php [L,QSA]
 
 # Alle anderen Anfragen → index.php
 RewriteRule ^ index.php [L]
+
+# Content-Security-Policy: Server-Vorgabe überschreiben (mod_headers erforderlich)
+# unset entfernt ggf. eine restriktivere Server-CSP, set setzt unsere eigene.
+<IfModule mod_headers.c>
+    Header always unset Content-Security-Policy
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'self' https://moodle.gymnasium-broich.de"
+    Header always set X-Content-Type-Options "nosniff"
+</IfModule>
