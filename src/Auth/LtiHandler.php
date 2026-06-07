@@ -16,8 +16,14 @@ class LtiHandler extends Tool
     public function __construct()
     {
         $this->db = Database::getInstance();
-        $connector = DataConnector::getDataConnector($this->db, 'lti_');
+        $connector = DataConnector::getDataConnector($this->db, 'lti2_');
         parent::__construct($connector);
+
+        $keyFile = self::resolveKeyPath($_ENV['LTI_PRIVATE_KEY_FILE'] ?? null);
+        if ($keyFile !== null) {
+            $this->rsaKey = file_get_contents($keyFile);
+        }
+        $this->jku = rtrim($_ENV['APP_URL'] ?? '', '/') . '/lti-jwks.php';
     }
 
     protected function onLaunch(): void
@@ -148,6 +154,18 @@ class LtiHandler extends Tool
         $stmt->execute([$benutzerId]);
 
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    // Löst relative Pfade relativ zum Projektverzeichnis auf (eine Ebene über public/).
+    public static function resolveKeyPath(?string $path): ?string
+    {
+        if (empty($path)) {
+            return null;
+        }
+        if (!str_starts_with($path, '/')) {
+            $path = dirname(__DIR__, 2) . '/' . $path;
+        }
+        return file_exists($path) ? $path : null;
     }
 
     private function weiseRolleZu(int $benutzerId, string $rolle): void

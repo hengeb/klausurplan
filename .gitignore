@@ -7,6 +7,7 @@
 # Private Keys
 *.key
 *.pem
+*.pub
 
 # IDE
 .idea/
