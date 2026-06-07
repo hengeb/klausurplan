@@ -1,13 +1,10 @@
 RewriteEngine On
+RewriteBase /
 
 # Existierende Dateien und Verzeichnisse direkt ausliefern (Assets etc.)
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
-
-# PHP-Datei ohne .php-Endung aufrufen (z.B. /setup → setup.php, /lti-jwks → lti-jwks.php)
-RewriteCond %{REQUEST_FILENAME}.php -f
-RewriteRule ^(.+)$ $1.php [L,QSA]
 
 # /api/* → api.php (REQUEST_URI bleibt erhalten, Router liest ihn aus)
 RewriteRule ^api(/.*)?$ api.php [L,QSA]

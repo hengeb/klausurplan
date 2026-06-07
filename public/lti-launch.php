@@ -20,6 +20,7 @@ try {
     $tool->handleRequest();
 } catch (Throwable $e) {
     http_response_code(500);
-    error_log('LTI-Launch-Fehler: ' . $e->getMessage());
-    echo '<!DOCTYPE html><html><body><p>Fehler beim LTI-Launch. Bitte kontaktieren Sie den Administrator.</p></body></html>';
+    error_log('LTI-Launch-Fehler: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    $detail = htmlspecialchars($e->getMessage());
+    echo "<!DOCTYPE html><html><body><p>Fehler beim LTI-Launch: <code>$detail</code></p></body></html>";
 }

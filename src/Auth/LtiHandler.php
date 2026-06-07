@@ -72,6 +72,42 @@ class LtiHandler extends Tool
         exit;
     }
 
+    /**
+     * Speichert den OIDC-State in der nativen PHP-Session statt in Laravel's Session-Facade.
+     */
+    protected function onInitiateLogin(array $requestParameters, array &$authParameters): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_start();
+        }
+        $_SESSION['ceLTIc_lti_authentication_request'] = [
+            'state' => $authParameters['state'],
+            'nonce' => $authParameters['nonce'],
+        ];
+    }
+
+    /**
+     * Validiert den OIDC-State aus der nativen PHP-Session.
+     */
+    protected function onAuthenticate(string $state, string $nonce, bool $usePlatformStorage): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_start();
+        }
+        if (isset($_SESSION['ceLTIc_lti_authentication_request'])) {
+            $auth = $_SESSION['ceLTIc_lti_authentication_request'];
+            unset($_SESSION['ceLTIc_lti_authentication_request']);
+            if (str_ends_with($state, '.platformStorage')) {
+                $state = substr($state, 0, -16);
+            }
+            if (($state !== $auth['state']) || ($nonce !== $auth['nonce'])) {
+                $this->setReason('Ungültige \'state\'- oder \'nonce\'-Werte');
+            }
+        } else {
+            $this->setReason('Keine LTI-OIDC-Sitzungsdaten gefunden – bitte erneut versuchen.');
+        }
+    }
+
     protected function onError(): void
     {
         $this->ok = false;
