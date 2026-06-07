@@ -47,7 +47,7 @@ class LtiHandler extends Tool
             return;
         }
 
-        $kuerzel = $this->extraktKuerzel($nachname);
+        $kuerzel = MoodleApi::extraktKuerzel($nachname);
 
         $benutzer = $this->syncBenutzer($moodleId, $vorname, $nachname, $email, $kuerzel);
         $rollen   = $this->ladeRollen($benutzer['id']);
@@ -78,15 +78,6 @@ class LtiHandler extends Tool
     }
 
     // --- private Hilfsmethoden ---
-
-    private function extraktKuerzel(string $nachname): ?string
-    {
-        if (preg_match('/\(([A-ZÄÖÜa-zäöü]{1,10})\)$/', trim($nachname), $treffer)) {
-            return strtoupper($treffer[1]);
-        }
-
-        return null;
-    }
 
     private function syncBenutzer(
         string  $moodleId,
