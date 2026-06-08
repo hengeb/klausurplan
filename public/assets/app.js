@@ -1963,6 +1963,8 @@ async function viewAdmin(el) {
                     <strong>${res.geloescht}</strong> gelöscht,
                     <strong>${res.gesamt}</strong> gesamt verarbeitet.
                 </div>`;
+            // Benutzertabelle still aktualisieren – kein Flackern, kein Scroll-Sprung
+            await ladeBenutzerAbschnitt(el, { stille: true });
         } catch (err) {
             ergebnis.innerHTML = `<p class="fehler">Fehler: ${escHtml(err.message)}</p>`;
         } finally {
@@ -2294,9 +2296,11 @@ async function zeigeNachschreibAnwesenheitDialog(termin) {
 // Admin: Benutzerverwaltung (Rollenzuweisung)
 // ---------------------------------------------------------------------------
 
-async function ladeBenutzerAbschnitt(el) {
+async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
     const container = el.querySelector('#benutzer-container');
-    container.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+    if (!stille) {
+        container.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+    }
 
     let [benutzer, stufen] = await Promise.all([
         apiFetch('/admin/benutzer'),
