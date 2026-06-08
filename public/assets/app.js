@@ -240,8 +240,8 @@ function renderZuordnungenView(el, daten) {
     // Zuordnungs-Buttons für Schüler*innen
     el.querySelectorAll('.btn-zuordnen-s').forEach(btn => {
         btn.addEventListener('click', async () => {
-            const kursSchuelerId = parseInt(btn.dataset.ksId);
-            const select = el.querySelector(`select[data-ks-id="${kursSchuelerId}"]`);
+            const nameRoh = btn.dataset.nameRoh;
+            const select  = el.querySelector(`select[data-name-roh="${CSS.escape(nameRoh)}"]`);
             const benutzerId = select?.value ? parseInt(select.value) : null;
 
             if (!benutzerId) return;
@@ -250,11 +250,11 @@ function renderZuordnungenView(el, daten) {
             try {
                 await apiFetch('/stufenleitung/zuordnungen', {
                     method: 'POST',
-                    body: JSON.stringify({ typ: 'schueler', kurs_schueler_id: kursSchuelerId, benutzer_id: benutzerId }),
+                    body: JSON.stringify({ typ: 'schueler', name_roh: nameRoh, benutzer_id: benutzerId }),
                 });
-                // Zeile ausblenden nach Zuordnung
-                btn.closest('tr').classList.add('zugeordnet');
-                btn.closest('tr').querySelector('.zuordnung-status').textContent = '✓ Zugeordnet';
+                const zeile = btn.closest('tr');
+                zeile.classList.add('zugeordnet');
+                zeile.querySelector('.zuordnung-status').textContent = '✓ Zugeordnet';
                 select.disabled = true;
                 btn.remove();
             } catch (err) {
@@ -267,8 +267,8 @@ function renderZuordnungenView(el, daten) {
     // Zuordnungs-Buttons für Lehrkräfte
     el.querySelectorAll('.btn-zuordnen-l').forEach(btn => {
         btn.addEventListener('click', async () => {
-            const kursId = parseInt(btn.dataset.kursId);
-            const select = el.querySelector(`select[data-kurs-id="${kursId}"]`);
+            const kuerzel    = btn.dataset.kuerzel;
+            const select     = el.querySelector(`select[data-kuerzel="${CSS.escape(kuerzel)}"]`);
             const benutzerId = select?.value ? parseInt(select.value) : null;
 
             if (!benutzerId) return;
@@ -277,10 +277,11 @@ function renderZuordnungenView(el, daten) {
             try {
                 await apiFetch('/stufenleitung/zuordnungen', {
                     method: 'POST',
-                    body: JSON.stringify({ typ: 'lehrkraft', kurs_id: kursId, benutzer_id: benutzerId }),
+                    body: JSON.stringify({ typ: 'lehrkraft', lehrer_kuerzel: kuerzel, benutzer_id: benutzerId }),
                 });
-                btn.closest('tr').classList.add('zugeordnet');
-                btn.closest('tr').querySelector('.zuordnung-status').textContent = '✓ Zugeordnet';
+                const zeile = btn.closest('tr');
+                zeile.classList.add('zugeordnet');
+                zeile.querySelector('.zuordnung-status').textContent = '✓ Zugeordnet';
                 select.disabled = true;
                 btn.remove();
             } catch (err) {
@@ -303,19 +304,20 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
 
     const zeilen = sGomst.map(ks => {
         const [nachname, vorname] = ks.name_roh.split('|');
+        const nameRohAttr = escHtml(ks.name_roh);
         return `
         <tr>
             <td>${escHtml(nachname)}, ${escHtml(vorname ?? '')}</td>
-            <td>${escHtml(ks.kurs)}</td>
-            <td>${escHtml(ks.stufe)} ${escHtml(ks.schuljahr)} / ${ks.abschnitt}. HJ</td>
+            <td>${escHtml(ks.stufen)}</td>
+            <td>${ks.anzahl_kurse}</td>
             <td>
-                <select data-ks-id="${ks.id}" class="select-zuordnung">
+                <select data-name-roh="${nameRohAttr}" class="select-zuordnung">
                     <option value="">– Moodle-Konto wählen –</option>
                     ${moodleOptionen}
                 </select>
             </td>
             <td>
-                <button class="btn btn-klein btn-zuordnen-s" data-ks-id="${ks.id}">Zuordnen</button>
+                <button class="btn btn-klein btn-zuordnen-s" data-name-roh="${nameRohAttr}">Zuordnen</button>
                 <span class="zuordnung-status"></span>
             </td>
         </tr>`;
@@ -324,15 +326,15 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
     return `
         <div class="tabelle-wrapper">
             <p class="tabelle-hinweis">
-                ${sGomst.length} Einträge aus GoMST ohne Moodle-Konto-Zuordnung.
-                Wählen Sie rechts das passende Moodle-Konto aus.
+                ${sGomst.length} Schüler*innen aus GoMST ohne Moodle-Konto-Zuordnung.
+                Wählen Sie das passende Moodle-Konto aus – die Zuordnung gilt für alle Kurse der Person.
             </p>
             <table class="zuordnungs-tabelle">
                 <thead>
                     <tr>
                         <th>GoMST-Name</th>
-                        <th>Kurs</th>
-                        <th>Stufe / Schuljahr</th>
+                        <th>Stufe(n)</th>
+                        <th>Kurse</th>
                         <th>Moodle-Konto</th>
                         <th></th>
                     </tr>
@@ -345,49 +347,44 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
 
 function renderLehrkraefte(lKurse, lMoodle) {
     if (lKurse.length === 0) {
-        return '<div class="karte"><p class="ok-text">✓ Alle Kurse haben eine Lehrkraft zugeordnet.</p></div>';
+        return '<div class="karte"><p class="ok-text">✓ Alle Lehrkräfte sind zugeordnet.</p></div>';
     }
 
     const moodleOptionen = lMoodle.map(l =>
         `<option value="${l.id}">${l.nachname}, ${l.vorname} (${l.kuerzel})</option>`
     ).join('');
 
-    // Kurse nach Kürzel gruppieren
-    const nachKuerzel = {};
-    for (const k of lKurse) {
-        (nachKuerzel[k.lehrer_kuerzel] ??= []).push(k);
-    }
-
-    const zeilen = lKurse.map(k => `
+    const zeilen = lKurse.map(k => {
+        const kuerzelAttr = escHtml(k.lehrer_kuerzel);
+        return `
         <tr>
-            <td>${escHtml(k.lehrer_kuerzel)}</td>
-            <td>${escHtml(k.anzeigename)}</td>
-            <td>${escHtml(k.stufe)} ${escHtml(k.schuljahr)} / ${k.abschnitt}. HJ</td>
+            <td>${kuerzelAttr}</td>
+            <td>${k.anzahl_kurse}</td>
             <td>
-                <select data-kurs-id="${k.id}" class="select-zuordnung">
+                <select data-kuerzel="${kuerzelAttr}" class="select-zuordnung">
                     <option value="">– Lehrkraft wählen –</option>
                     ${moodleOptionen}
                 </select>
             </td>
             <td>
-                <button class="btn btn-klein btn-zuordnen-l" data-kurs-id="${k.id}">Zuordnen</button>
+                <button class="btn btn-klein btn-zuordnen-l" data-kuerzel="${kuerzelAttr}">Zuordnen</button>
                 <span class="zuordnung-status"></span>
             </td>
-        </tr>`
-    ).join('');
+        </tr>`;
+    }).join('');
 
     return `
         <div class="tabelle-wrapper">
             <p class="tabelle-hinweis">
-                ${lKurse.length} Kurs(e) ohne Lehrkraft-Zuordnung.
+                ${lKurse.length} Kürzel ohne Moodle-Konto-Zuordnung.
+                Die Zuordnung gilt für alle Kurse mit dem jeweiligen Kürzel.
             </p>
             <table class="zuordnungs-tabelle">
                 <thead>
                     <tr>
                         <th>Kürzel</th>
-                        <th>Kurs</th>
-                        <th>Stufe / Schuljahr</th>
-                        <th>Lehrkraft</th>
+                        <th>Kurse</th>
+                        <th>Moodle-Konto</th>
                         <th></th>
                     </tr>
                 </thead>

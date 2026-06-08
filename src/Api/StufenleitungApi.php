@@ -56,21 +56,18 @@ class StufenleitungApi
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
-        // GoMST-Einträge ohne Moodle-Konto
+        // GoMST-Einträge ohne Moodle-Konto – eine Zeile pro Person (name_roh)
         $schuelerGomst = $db->query(
-            "SELECT ks.id,
-                    ks.name_roh,
-                    k.id          AS kurs_id,
-                    k.anzeigename AS kurs,
-                    s.name        AS stufe,
-                    s.schuljahr,
-                    h.abschnitt
+            "SELECT ks.name_roh,
+                    COUNT(DISTINCT ks.id)                                         AS anzahl_kurse,
+                    GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ')  AS stufen
              FROM kurs_schueler ks
-             JOIN kurse k          ON k.id = ks.kurs_id
-             JOIN halbjahre h      ON h.id = k.halbjahr_id
-             JOIN stufen s         ON s.id = h.stufe_id
+             JOIN kurse k     ON k.id = ks.kurs_id
+             JOIN halbjahre h ON h.id = k.halbjahr_id
+             JOIN stufen s    ON s.id = h.stufe_id
              WHERE ks.schueler_id IS NULL
-             ORDER BY s.schuljahr DESC, s.name, h.abschnitt, ks.name_roh"
+             GROUP BY ks.name_roh
+             ORDER BY ks.name_roh"
         )->fetchAll();
 
         // Moodle-Nutzer*innen ohne Schüler*innen-Zuordnung (kein Kürzel → kein Lehrer)
@@ -84,21 +81,15 @@ class StufenleitungApi
              ORDER BY b.nachname, b.vorname"
         )->fetchAll();
 
-        // Kurse ohne Lehrkraft-Zuordnung (aber mit Kürzel aus GoMST)
+        // Personen mit unbekanntem Kürzel – eine Zeile pro Kürzel
         $lehrkraefteKurse = $db->query(
-            "SELECT DISTINCT
-                    k.id,
-                    k.lehrer_kuerzel,
-                    k.anzeigename,
-                    s.name        AS stufe,
-                    s.schuljahr,
-                    h.abschnitt
+            "SELECT k.lehrer_kuerzel,
+                    COUNT(DISTINCT k.id) AS anzahl_kurse
              FROM kurse k
-             JOIN halbjahre h ON h.id = k.halbjahr_id
-             JOIN stufen s    ON s.id = h.stufe_id
              WHERE k.lehrer_kuerzel IS NOT NULL
                AND k.lehrer_id IS NULL
-             ORDER BY k.lehrer_kuerzel, k.anzeigename"
+             GROUP BY k.lehrer_kuerzel
+             ORDER BY k.lehrer_kuerzel"
         )->fetchAll();
 
         // Moodle-Lehrkräfte ohne Kurszuordnung
@@ -125,16 +116,15 @@ class StufenleitungApi
     // ------------------------------------------------------------------
 
     /**
-     * Speichert eine manuelle Zuordnung.
+     * Speichert eine manuelle Zuordnung – immer personenbezogen, nicht kursbezogen.
      *
      * Body für Schüler*innen:
-     *   { "typ": "schueler", "kurs_schueler_id": 42, "benutzer_id": 17 }
+     *   { "typ": "schueler", "name_roh": "Mustermann|Max", "benutzer_id": 17 }
+     *   Aktualisiert ALLE kurs_schueler-Einträge mit diesem name_roh.
      *
      * Body für Lehrkräfte:
-     *   { "typ": "lehrkraft", "kurs_id": 5, "benutzer_id": 23 }
-     *
-     * Zuordnung entfernen (schueler_id auf NULL):
-     *   { "typ": "schueler", "kurs_schueler_id": 42, "benutzer_id": null }
+     *   { "typ": "lehrkraft", "lehrer_kuerzel": "SZ", "benutzer_id": 23 }
+     *   Aktualisiert ALLE Kurse mit diesem lehrer_kuerzel.
      */
     public static function postZuordnung(array $body): array
     {
@@ -143,37 +133,37 @@ class StufenleitungApi
         $typ = $body['typ'] ?? '';
 
         if ($typ === 'schueler') {
-            $kursSchuelerId = (int) ($body['kurs_schueler_id'] ?? 0);
-            $benutzerId     = isset($body['benutzer_id']) && $body['benutzer_id'] !== null
-                ? (int) $body['benutzer_id']
-                : null;
-
-            if ($kursSchuelerId === 0) {
-                http_response_code(400);
-                throw new RuntimeException('kurs_schueler_id fehlt.');
-            }
-
-            $db->prepare('UPDATE kurs_schueler SET schueler_id = ? WHERE id = ?')
-               ->execute([$benutzerId, $kursSchuelerId]);
-
-            return ['ok' => true];
-        }
-
-        if ($typ === 'lehrkraft') {
-            $kursId     = (int) ($body['kurs_id'] ?? 0);
+            $nameRoh    = $body['name_roh'] ?? '';
             $benutzerId = isset($body['benutzer_id']) && $body['benutzer_id'] !== null
                 ? (int) $body['benutzer_id']
                 : null;
 
-            if ($kursId === 0) {
+            if ($nameRoh === '') {
                 http_response_code(400);
-                throw new RuntimeException('kurs_id fehlt.');
+                throw new RuntimeException('name_roh fehlt.');
             }
 
-            $db->prepare('UPDATE kurse SET lehrer_id = ? WHERE id = ?')
-               ->execute([$benutzerId, $kursId]);
+            $stmt = $db->prepare('UPDATE kurs_schueler SET schueler_id = ? WHERE name_roh = ?');
+            $stmt->execute([$benutzerId, $nameRoh]);
 
-            return ['ok' => true];
+            return ['ok' => true, 'aktualisiert' => $stmt->rowCount()];
+        }
+
+        if ($typ === 'lehrkraft') {
+            $lehrerKuerzel = $body['lehrer_kuerzel'] ?? '';
+            $benutzerId    = isset($body['benutzer_id']) && $body['benutzer_id'] !== null
+                ? (int) $body['benutzer_id']
+                : null;
+
+            if ($lehrerKuerzel === '') {
+                http_response_code(400);
+                throw new RuntimeException('lehrer_kuerzel fehlt.');
+            }
+
+            $stmt = $db->prepare('UPDATE kurse SET lehrer_id = ? WHERE lehrer_kuerzel = ?');
+            $stmt->execute([$benutzerId, $lehrerKuerzel]);
+
+            return ['ok' => true, 'aktualisiert' => $stmt->rowCount()];
         }
 
         http_response_code(400);
