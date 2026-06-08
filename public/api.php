@@ -107,7 +107,11 @@ $router->get('/klausuren', function (): array {
     return LehrkraftApi::getKlausuren();
 }, 'admin', 'stufenleitung', 'lehrkraft');
 
-// paste-import VOR {id}, sonst wird "paste-import" als ID interpretiert
+// Vorlage-Download und paste-import VOR {id}, sonst werden sie als ID interpretiert
+$router->get('/klausuren/vorlage', function (): never {
+    LehrkraftApi::downloadVorlage();
+}, 'admin', 'stufenleitung');
+
 $router->post('/klausuren/paste-import', function (): array {
     $zeilen = Router::jsonBody();
     if (!is_array($zeilen)) {

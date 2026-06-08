@@ -858,11 +858,18 @@ function ladePasteImport(el, nachImport) {
         <div class="karte">
             <h3>Excel-Import</h3>
             <p>
-                Markieren Sie in Excel die gesamte Tabelle inkl. Kopfzeile und kopieren Sie sie (Strg+C).
-                Klicken Sie dann in das Textfeld und fügen Sie ein (Strg+V).
+                Laden Sie die Vorlage herunter – sie enthält bereits alle Kurse des aktuellen Halbjahres.
+                Öffnen Sie sie in Excel, tragen Sie Datum, Uhrzeit, Dauer und Raum ein.
+                Dann alles markieren (Strg+A), kopieren (Strg+C), in das Textfeld unten klicken und einfügen (Strg+V).
             </p>
-            <p>Erwartete Spalten: <code>Kurs</code>, <code>Datum</code>, <code>Uhrzeit</code>, <code>Dauer</code>, <code>Raum</code>
-            (Reihenfolge egal, Datum im Format TT.MM.JJJJ)</p>
+            <p class="hinweis">
+                Datum im Format <strong>TT.MM.JJJJ</strong> als Text eingeben
+                (Zellen ggf. als Text formatieren, damit Excel das Datum nicht umwandelt).
+                Die Spalte "Anzeigename" wird beim Import ignoriert.
+            </p>
+            <div style="margin-bottom:1rem">
+                <a href="/api/klausuren/vorlage" class="btn btn-sekundaer">Vorlage herunterladen (.csv)</a>
+            </div>
             <textarea id="paste-feld" class="paste-textarea" placeholder="Hier einfügen (Strg+V)…" rows="10"></textarea>
             <div id="paste-vorschau"></div>
         </div>

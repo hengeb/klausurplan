@@ -173,8 +173,10 @@ class LehrkraftApi
     /**
      * Verarbeitet geparste Excel-Paste-Daten.
      *
-     * Body: Array von { kurs: string, datum?: string, uhrzeit?: string, dauer?: string, raum?: string }
-     * Legt je Kurs Klausur Nr. 1 an (Upsert).
+     * Matching-Priorität je Kurs:
+     * 1. Gleicher Kurs, gleiches Datum → Uhrzeit/Dauer/Raum aktualisieren
+     * 2. Gleicher Kurs, kein Datum → Datum + alle Felder setzen
+     * 3. Kein Treffer → neu anlegen
      *
      * @return array{ erstellt: int, aktualisiert: int, fehler: array[] }
      */
@@ -187,33 +189,39 @@ class LehrkraftApi
         $fehler   = $ergebnis['fehler'];
         $erstellt = $aktualisiert = 0;
 
-        $benutzer = Session::getBenutzer();
+        $benutzer  = Session::getBenutzer();
+        $halbjahrIds = self::aktuelleHalbjahrIds($db);
 
         foreach ($ergebnis['zeilen'] as $i => $z) {
-            // Kurs anhand des Kürzels suchen (neuestes Halbjahr bei Mehrdeutigkeit)
-            $kursStmt = $db->prepare(
-                'SELECT k.id FROM kurse k
-                 JOIN halbjahre h ON h.id = k.halbjahr_id
-                 JOIN stufen s    ON s.id = h.stufe_id
-                 WHERE k.kurs_kuerzel = ?
-                 ORDER BY s.schuljahr DESC, h.abschnitt DESC
-                 LIMIT 1'
-            );
-            $kursStmt->execute([$z['kurs_kuerzel']]);
-            $kursId = $kursStmt->fetchColumn();
+            // Kurs aus dem aktuellen Halbjahr suchen
+            $kursId = self::kursIdFuerKuerzel($db, $z['kurs_kuerzel'], $halbjahrIds);
 
-            if ($kursId === false) {
+            if ($kursId === null) {
                 $fehler[] = ['zeile' => $i + 1, 'meldung' => 'Kurs "' . $z['kurs_kuerzel'] . '" nicht gefunden.'];
                 continue;
             }
-            $kursId = (int) $kursId;
 
-            // Upsert: Klausur Nr. 1 für diesen Kurs
-            $vorhandeneStmt = $db->prepare(
-                'SELECT id FROM klausuren WHERE kurs_id = ? AND klausur_nr = 1'
+            // Priorität 1: gleicher Kurs, gleiches Datum
+            if ($z['termin_datum'] !== null) {
+                $stmt = $db->prepare('SELECT id FROM klausuren WHERE kurs_id = ? AND termin_datum = ?');
+                $stmt->execute([$kursId, $z['termin_datum']]);
+                $vorhandeneId = $stmt->fetchColumn();
+
+                if ($vorhandeneId !== false) {
+                    $db->prepare(
+                        'UPDATE klausuren SET termin_uhrzeit = ?, dauer_minuten = ?, raum = ? WHERE id = ?'
+                    )->execute([$z['termin_uhrzeit'], $z['dauer_minuten'], $z['raum'], $vorhandeneId]);
+                    $aktualisiert++;
+                    continue;
+                }
+            }
+
+            // Priorität 2: gleicher Kurs, kein Datum
+            $stmt = $db->prepare(
+                'SELECT id FROM klausuren WHERE kurs_id = ? AND termin_datum IS NULL ORDER BY klausur_nr LIMIT 1'
             );
-            $vorhandeneStmt->execute([$kursId]);
-            $vorhandeneId = $vorhandeneStmt->fetchColumn();
+            $stmt->execute([$kursId]);
+            $vorhandeneId = $stmt->fetchColumn();
 
             if ($vorhandeneId !== false) {
                 $db->prepare(
@@ -222,36 +230,90 @@ class LehrkraftApi
                      WHERE id = ?'
                 )->execute([$z['termin_datum'], $z['termin_uhrzeit'], $z['dauer_minuten'], $z['raum'], $vorhandeneId]);
                 $aktualisiert++;
-            } else {
-                $db->prepare(
-                    'INSERT INTO klausuren (kurs_id, klausur_nr, termin_datum, termin_uhrzeit, dauer_minuten, raum, erstellt_von)
-                     VALUES (?, 1, ?, ?, ?, ?, ?)'
-                )->execute([$kursId, $z['termin_datum'], $z['termin_uhrzeit'], $z['dauer_minuten'], $z['raum'], $benutzer['id']]);
-                $erstellt++;
+                continue;
             }
+
+            // Priorität 3: neu anlegen
+            $klausurNr = self::naechsteKlausurNr($db, $kursId);
+            $db->prepare(
+                'INSERT INTO klausuren (kurs_id, klausur_nr, termin_datum, termin_uhrzeit, dauer_minuten, raum, erstellt_von)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+            )->execute([$kursId, $klausurNr, $z['termin_datum'], $z['termin_uhrzeit'], $z['dauer_minuten'], $z['raum'], $benutzer['id']]);
+            $erstellt++;
         }
 
         return ['erstellt' => $erstellt, 'aktualisiert' => $aktualisiert, 'fehler' => $fehler];
     }
 
     // ------------------------------------------------------------------
-    // Kursliste (für Dropdown bei Direktanlage)
+    // Kursliste (für Dropdown bei Direktanlage) + Vorlage-Download
     // ------------------------------------------------------------------
 
-    /** Alle Kurse mit Halbjahr-Info für das Direktanlage-Formular. */
+    /** Kurse des aktuellen (neuesten) Halbjahres für das Direktanlage-Formular. */
     public static function getKurse(): array
     {
         Session::requireRolle('admin', 'stufenleitung');
-        $db = Database::getInstance();
+        $db          = Database::getInstance();
+        $halbjahrIds = self::aktuelleHalbjahrIds($db);
 
-        return $db->query(
+        if (empty($halbjahrIds)) {
+            return [];
+        }
+
+        $platzhalter = implode(',', array_fill(0, count($halbjahrIds), '?'));
+        $stmt = $db->prepare(
             "SELECT k.id, k.kurs_kuerzel, k.anzeigename, k.kursart,
                     s.name AS stufe, s.schuljahr, h.abschnitt, h.id AS halbjahr_id
              FROM kurse k
              JOIN halbjahre h ON h.id = k.halbjahr_id
              JOIN stufen s    ON s.id = h.stufe_id
-             ORDER BY s.schuljahr DESC, h.abschnitt DESC, k.anzeigename"
-        )->fetchAll();
+             WHERE k.halbjahr_id IN ($platzhalter)
+             ORDER BY k.anzeigename"
+        );
+        $stmt->execute($halbjahrIds);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Generiert eine CSV-Vorlage mit allen Kursen des aktuellen Halbjahres
+     * und sendet sie als Datei-Download. Endet mit exit().
+     */
+    public static function downloadVorlage(): never
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db          = Database::getInstance();
+        $halbjahrIds = self::aktuelleHalbjahrIds($db);
+
+        $kurse = [];
+        if (!empty($halbjahrIds)) {
+            $platzhalter = implode(',', array_fill(0, count($halbjahrIds), '?'));
+            $stmt = $db->prepare(
+                "SELECT k.kurs_kuerzel, k.anzeigename
+                 FROM kurse k
+                 WHERE k.halbjahr_id IN ($platzhalter)
+                 ORDER BY k.anzeigename"
+            );
+            $stmt->execute($halbjahrIds);
+            $kurse = $stmt->fetchAll();
+        }
+
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="klausur-vorlage.csv"');
+        header('Cache-Control: no-cache, no-store');
+        header('Content-Security-Policy: default-src \'none\'');
+
+        $out = fopen('php://output', 'w');
+        fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM für Excel
+
+        // Anzeigename als Hilfsspalte; Kurs = kurs_kuerzel (wird beim Import verwendet)
+        fputcsv($out, ['Kurs', 'Anzeigename', 'Datum', 'Uhrzeit', 'Dauer', 'Raum'], ';');
+
+        foreach ($kurse as $k) {
+            fputcsv($out, [$k['kurs_kuerzel'], $k['anzeigename'], '', '', '', ''], ';');
+        }
+
+        fclose($out);
+        exit();
     }
 
     // ------------------------------------------------------------------
@@ -377,6 +439,65 @@ class LehrkraftApi
     // ------------------------------------------------------------------
     // Hilfsmethoden
     // ------------------------------------------------------------------
+
+    /**
+     * Gibt die IDs aller Halbjahre des neuesten Schuljahres und Abschnitts zurück.
+     * "Neuestes" = höchstes Schuljahr (lexikografisch), darin höchster Abschnitt.
+     */
+    private static function aktuelleHalbjahrIds(\PDO $db): array
+    {
+        $row = $db->query(
+            "SELECT s.schuljahr, MAX(h.abschnitt) AS abschnitt
+             FROM halbjahre h
+             JOIN stufen s ON s.id = h.stufe_id
+             WHERE s.schuljahr = (SELECT MAX(schuljahr) FROM stufen)
+             GROUP BY s.schuljahr"
+        )->fetch();
+
+        if ($row === false) {
+            return [];
+        }
+
+        $stmt = $db->prepare(
+            "SELECT h.id FROM halbjahre h
+             JOIN stufen s ON s.id = h.stufe_id
+             WHERE s.schuljahr = ? AND h.abschnitt = ?"
+        );
+        $stmt->execute([$row['schuljahr'], $row['abschnitt']]);
+        return array_column($stmt->fetchAll(), 'id');
+    }
+
+    /**
+     * Sucht die Kurs-ID anhand des Kürzels, bevorzugt aus den angegebenen Halbjahren.
+     * Fallback auf neuestes verfügbares Halbjahr.
+     */
+    private static function kursIdFuerKuerzel(\PDO $db, string $kuerzel, array $halbjahrIds): ?int
+    {
+        if (!empty($halbjahrIds)) {
+            $platzhalter = implode(',', array_fill(0, count($halbjahrIds), '?'));
+            $stmt = $db->prepare(
+                "SELECT id FROM kurse WHERE kurs_kuerzel = ? AND halbjahr_id IN ($platzhalter) LIMIT 1"
+            );
+            $stmt->execute([$kuerzel, ...$halbjahrIds]);
+            $id = $stmt->fetchColumn();
+            if ($id !== false) {
+                return (int) $id;
+            }
+        }
+
+        // Fallback: neuestes Halbjahr generell
+        $stmt = $db->prepare(
+            'SELECT k.id FROM kurse k
+             JOIN halbjahre h ON h.id = k.halbjahr_id
+             JOIN stufen s    ON s.id = h.stufe_id
+             WHERE k.kurs_kuerzel = ?
+             ORDER BY s.schuljahr DESC, h.abschnitt DESC
+             LIMIT 1'
+        );
+        $stmt->execute([$kuerzel]);
+        $id = $stmt->fetchColumn();
+        return $id !== false ? (int) $id : null;
+    }
 
     private static function naechsteKlausurNr(\PDO $db, int $kursId): int
     {
