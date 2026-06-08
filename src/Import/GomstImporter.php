@@ -12,8 +12,14 @@ class GomstImporter
     private \PDO $db;
     private int  $importiertVon;
 
-    /** Klausurrelevante Kursarten */
+    /** GoMST-Kursarten, die importiert werden */
     private const KLAUSUR_KURSARTEN = ['GKS', 'LK1', 'LK2', 'AB3', 'AB4'];
+
+    /** Mappt GoMST-Rohwert auf vereinfachte Kursart ('LK' oder 'GK') */
+    private static function vereinfacheKursart(string $gomstKursart): string
+    {
+        return str_starts_with($gomstKursart, 'LK') ? 'LK' : 'GK';
+    }
 
     public function __construct(int $importiertVon)
     {
@@ -71,12 +77,15 @@ class GomstImporter
             $halbjahrId = $this->findeOderLegeAnHalbjahr($stufeId, $abschnitt);
             $halbjahrIds[$halbjahrId] = true;
 
-            $kursId = $this->findeOderLegeAnKurs($halbjahrId, $kursKuerzel, $fachKuerzel, $kursart, $lehrerKuerzel);
+            $kursId = $this->findeOderLegeAnKurs(
+                $halbjahrId, $kursKuerzel, $fachKuerzel,
+                self::vereinfacheKursart($kursart), $lehrerKuerzel,
+            );
 
             if ($nachname !== '' || $vorname !== '') {
                 $nameRoh = $nachname . '|' . $vorname;
                 if (!isset($verarbeitet[$kursId][$nameRoh])) {
-                    $this->findeOderLegeAnKursSchueler($kursId, $nameRoh);
+                    $this->findeOderLegeAnKursSchueler($kursId, $nameRoh, $kursart);
                     $verarbeitet[$kursId][$nameRoh] = true;
                     $schuelerAnzahl++;
                 }
@@ -203,14 +212,20 @@ class GomstImporter
         return (int) $this->db->lastInsertId();
     }
 
-    private function findeOderLegeAnKursSchueler(int $kursId, string $nameRoh): void
+    private function findeOderLegeAnKursSchueler(int $kursId, string $nameRoh, string $kursart): void
     {
         $stmt = $this->db->prepare('SELECT id FROM kurs_schueler WHERE kurs_id = ? AND name_roh = ?');
         $stmt->execute([$kursId, $nameRoh]);
-        if ($stmt->fetchColumn() === false) {
+        $id = $stmt->fetchColumn();
+
+        if ($id === false) {
             $this->db->prepare(
-                'INSERT INTO kurs_schueler (kurs_id, name_roh) VALUES (?, ?)'
-            )->execute([$kursId, $nameRoh]);
+                'INSERT INTO kurs_schueler (kurs_id, name_roh, kursart) VALUES (?, ?, ?)'
+            )->execute([$kursId, $nameRoh, $kursart]);
+        } else {
+            // Kursart bei erneutem Import aktualisieren
+            $this->db->prepare('UPDATE kurs_schueler SET kursart = ? WHERE id = ?')
+                ->execute([$kursart, $id]);
         }
     }
 
@@ -339,13 +354,8 @@ class GomstImporter
         $stmt->execute([strtoupper($fachKuerzel)]);
         $fachname = $stmt->fetchColumn() ?: $fachKuerzel;
 
-        // Kursart-Typ: GKS → "GK", LK1/LK2 → "LK", AB3/AB4 → "AB"
-        $kursartTyp = match(true) {
-            $kursart === 'GKS'                         => 'GK',
-            in_array($kursart, ['LK1', 'LK2'], true)   => 'LK',
-            in_array($kursart, ['AB3', 'AB4'], true)   => 'AB',
-            default                                    => $kursart,
-        };
+        // kursart ist bereits vereinfacht ('LK' oder 'GK')
+        $kursartTyp = $kursart;
 
         // Nummer aus dem dritten Teil extrahieren: "GK1" → "1", "LK2" → "2"
         $nummer = preg_replace('/\D/', '', $kursartNrTeil);
