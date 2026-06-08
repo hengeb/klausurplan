@@ -35,36 +35,43 @@ class MoodleApi
         $neu = $aktualisiert = 0;
 
         foreach ($moodleNutzer as $mn) {
-            $moodleId = (string) $mn['id'];
-            $vorname  = trim($mn['firstname'] ?? '');
-            $nachname = trim($mn['lastname']  ?? '');
-            $kuerzel  = self::extraktKuerzel($nachname);
+            $moodleId     = (string) $mn['id'];
+            $vorname      = trim($mn['firstname'] ?? '');
+            $nachname     = trim($mn['lastname']  ?? '');
+            $istLehrkraft = self::istLehrkraft($mn);
 
-            // E-Mail nur für Lehrkräfte importieren; leerer String = nicht öffentlich = null
+            // Kürzel nur für Lehrkräfte extrahieren (ein "(AB)" im Schülernamen ist kein Kürzel)
+            $kuerzel = $istLehrkraft ? self::extraktKuerzel($nachname) : null;
+
+            // Stufe nur für Schüler*innen (alphanumerisches Präfix aus dem klasse-Feld)
+            $stufe = !$istLehrkraft ? self::extraktStufe($mn) : null;
+
+            // E-Mail nur für Lehrkräfte importieren
             $emailRaw = $mn['email'] ?? '';
-            $email    = ($kuerzel !== null && !empty($emailRaw)) ? $emailRaw : null;
+            $email    = ($istLehrkraft && !empty($emailRaw)) ? $emailRaw : null;
 
             if (empty($vorname) || empty($nachname)) {
                 continue;
             }
 
             $stmt = $db->prepare(
-                'SELECT vorname, nachname, email, kuerzel FROM benutzer WHERE moodle_id = ?'
+                'SELECT vorname, nachname, email, kuerzel, stufe FROM benutzer WHERE moodle_id = ?'
             );
             $stmt->execute([$moodleId]);
             $vorhandener = $stmt->fetch();
 
             if ($vorhandener === false) {
                 $db->prepare(
-                    'INSERT INTO benutzer (moodle_id, vorname, nachname, email, kuerzel)
-                     VALUES (?, ?, ?, ?, ?)'
-                )->execute([$moodleId, $vorname, $nachname, $email, $kuerzel]);
+                    'INSERT INTO benutzer (moodle_id, vorname, nachname, email, kuerzel, stufe)
+                     VALUES (?, ?, ?, ?, ?, ?)'
+                )->execute([$moodleId, $vorname, $nachname, $email, $kuerzel, $stufe]);
                 $neu++;
             } else {
                 $geandert = $vorhandener['vorname'] !== $vorname
                     || $vorhandener['nachname'] !== $nachname
                     || $vorhandener['email'] !== $email
-                    || ($kuerzel !== null && $vorhandener['kuerzel'] !== $kuerzel);
+                    || ($kuerzel !== null && $vorhandener['kuerzel'] !== $kuerzel)
+                    || $vorhandener['stufe'] !== $stufe;
 
                 if ($geandert) {
                     $db->prepare(
@@ -72,9 +79,10 @@ class MoodleApi
                          SET vorname  = ?,
                              nachname = ?,
                              email    = ?,
-                             kuerzel  = CASE WHEN ? IS NOT NULL THEN ? ELSE kuerzel END
+                             kuerzel  = CASE WHEN ? IS NOT NULL THEN ? ELSE kuerzel END,
+                             stufe    = ?
                          WHERE moodle_id = ?'
-                    )->execute([$vorname, $nachname, $email, $kuerzel, $kuerzel, $moodleId]);
+                    )->execute([$vorname, $nachname, $email, $kuerzel, $kuerzel, $stufe, $moodleId]);
                     $aktualisiert++;
                 }
             }
@@ -123,8 +131,8 @@ class MoodleApi
 
     /**
      * Gibt alle Nutzer*innen aus Moodle zurück (ldap + manual, dedupliziert nach ID).
-     * Für Lehrkräfte (erkennbar am Kürzel) werden E-Mails per core_user_get_users_by_field
-     * nachgeladen, da core_user_get_users die E-Mail-Privatsphäre der Nutzer*innen respektiert.
+     * E-Mails, die Nutzer*innen in Moodle als privat markiert haben, werden nicht
+     * zurückgegeben – sie werden stattdessen beim LTI-Login aus dem JWT-Claim befüllt.
      */
     private function alleNutzer(): array
     {
@@ -151,61 +159,7 @@ class MoodleApi
             }
         }
 
-        // E-Mails für Lehrkräfte (mit Kürzel) gezielt nachladen
-        $lehrkraftIds = array_keys(array_filter(
-            $nutzer,
-            fn($u) => self::extraktKuerzel(trim($u['lastname'] ?? '')) !== null
-        ));
-
-        if (!empty($lehrkraftIds)) {
-            foreach ($this->emailsNachladen($lehrkraftIds) as $id => $email) {
-                if (isset($nutzer[$id])) {
-                    $nutzer[$id]['email'] = $email;
-                }
-            }
-        }
-
         return array_values($nutzer);
-    }
-
-    /**
-     * Lädt E-Mails für die angegebenen Moodle-User-IDs via core_user_get_users_by_field.
-     * Diese Funktion respektiert die E-Mail-Privatsphäre-Einstellung nicht.
-     *
-     * @param  int[]  $ids
-     * @return array<int, string>  Moodle-ID → E-Mail
-     */
-    private function emailsNachladen(array $ids): array
-    {
-        $emails  = [];
-
-        foreach (array_chunk($ids, 100) as $batch) {
-            $params = [
-                'wstoken'            => $this->token,
-                'wsfunction'         => 'core_user_get_users_by_field',
-                'moodlewsrestformat' => 'json',
-                'field'              => 'id',
-            ];
-            foreach ($batch as $i => $id) {
-                $params["values[$i]"] = $id;
-            }
-
-            $url  = $this->baseUrl . '/webservice/rest/server.php?' . http_build_query($params);
-            $data = $this->get($url);
-
-            // Fehler beim Nachladen ignorieren – E-Mail bleibt dann leer
-            if (isset($data['exception'])) {
-                break;
-            }
-
-            foreach ($data as $user) {
-                if (!empty($user['email'])) {
-                    $emails[(int) $user['id']] = $user['email'];
-                }
-            }
-        }
-
-        return $emails;
     }
 
     private function get(string $url): array
@@ -235,6 +189,38 @@ class MoodleApi
     {
         if (preg_match('/\(([A-ZÄÖÜa-zäöü]{1,10})\)$/', trim($nachname), $treffer)) {
             return strtoupper($treffer[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Prüft anhand des Moodle-Customfields "klasse", ob es sich um eine Lehrkraft handelt.
+     */
+    private static function istLehrkraft(array $moodleUser): bool
+    {
+        foreach ($moodleUser['customfields'] ?? [] as $field) {
+            if (($field['shortname'] ?? '') === 'klasse') {
+                return ($field['value'] ?? '') === 'Lehrkraft';
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Extrahiert die Stufe aus dem Moodle-Customfield "klasse" (z.B. "EF", "Q1", "Q2").
+     * Nur das führende alphanumerische Präfix wird verwendet ("Q1 Kurs 3" → "Q1").
+     */
+    private static function extraktStufe(array $moodleUser): ?string
+    {
+        foreach ($moodleUser['customfields'] ?? [] as $field) {
+            if (($field['shortname'] ?? '') === 'klasse') {
+                $value = trim($field['value'] ?? '');
+                if ($value !== '' && preg_match('/^[A-Za-z0-9]+/', $value, $treffer)) {
+                    return $treffer[0];
+                }
+            }
         }
 
         return null;
