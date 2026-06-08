@@ -7,6 +7,7 @@ use Klausurplan\Api\Router;
 use Klausurplan\Api\MeController;
 use Klausurplan\Api\AdminApi;
 use Klausurplan\Api\StufenleitungApi;
+use Klausurplan\Api\LehrkraftApi;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -97,6 +98,57 @@ $router->get('/stufenleitung/halbjahre', function (): array {
 
 $router->get('/stufenleitung/halbjahre/{id}/kurse', function (array $p): array {
     return StufenleitungApi::getKurse((int) $p['id']);
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Klausuren
+// ------------------------------------------------------------------
+$router->get('/klausuren', function (): array {
+    return LehrkraftApi::getKlausuren();
+}, 'admin', 'stufenleitung', 'lehrkraft');
+
+// paste-import VOR {id}, sonst wird "paste-import" als ID interpretiert
+$router->post('/klausuren/paste-import', function (): array {
+    $zeilen = Router::jsonBody();
+    if (!is_array($zeilen)) {
+        http_response_code(400);
+        return ['fehler' => 'Array erwartet'];
+    }
+    return LehrkraftApi::postPasteImport($zeilen);
+}, 'admin', 'stufenleitung');
+
+$router->post('/klausuren', function (): array {
+    return LehrkraftApi::postKlausur(Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+$router->put('/klausuren/{id}', function (array $p): array {
+    return LehrkraftApi::putKlausur((int) $p['id'], Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Kursliste (für Dropdown)
+// ------------------------------------------------------------------
+$router->get('/kurse', function (): array {
+    return LehrkraftApi::getKurse();
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Nachschreibtermine
+// ------------------------------------------------------------------
+$router->get('/nachschreibtermine', function (): array {
+    return LehrkraftApi::getNachschreibtermine();
+}, 'admin', 'stufenleitung', 'lehrkraft');
+
+$router->post('/nachschreibtermine', function (): array {
+    return LehrkraftApi::postNachschreibtermin(Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+$router->put('/nachschreibtermine/{id}', function (array $p): array {
+    return LehrkraftApi::putNachschreibtermin((int) $p['id'], Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+$router->post('/nachschreibtermine/{id}/klausuren', function (array $p): array {
+    return LehrkraftApi::postNachschreibterminKlausuren((int) $p['id'], Router::jsonBody());
 }, 'admin', 'stufenleitung');
 
 // ------------------------------------------------------------------

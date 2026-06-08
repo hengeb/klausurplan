@@ -27,10 +27,12 @@ function hatRolle(...gesucht) {
 // ---------------------------------------------------------------------------
 
 const VIEWS = {
-    start:       viewStart,
-    import:      viewImport,
-    zuordnungen: viewZuordnungen,
-    halbjahre:   viewHalbjahre,
+    start:               viewStart,
+    import:              viewImport,
+    zuordnungen:         viewZuordnungen,
+    halbjahre:           viewHalbjahre,
+    klausuren:           viewKlausuren,
+    nachschreibtermine:  viewNachschreibtermine,
 };
 
 function navigate(hash) {
@@ -59,6 +61,11 @@ function renderNav() {
         { hash: 'start', label: 'Übersicht' },
     ];
 
+    if (hatRolle('admin', 'stufenleitung', 'lehrkraft')) {
+        links.push({ hash: 'klausuren', label: 'Klausuren' });
+        links.push({ hash: 'nachschreibtermine', label: 'Nachschreibtermine' });
+    }
+
     if (hatRolle('admin', 'stufenleitung')) {
         links.push(
             { hash: 'import',      label: 'GoMST-Import' },
@@ -84,8 +91,17 @@ async function viewStart(el) {
             <h2>Willkommen, ${me.vorname} ${me.nachname}</h2>
             <p>Rollen: <strong>${me.rollen.length ? me.rollen.join(', ') : '–'}</strong></p>
         </div>
-        ${hatRolle('admin', 'stufenleitung') ? `
         <div class="kacheln">
+            ${hatRolle('admin', 'stufenleitung', 'lehrkraft') ? `
+            <a href="#klausuren" class="kachel">
+                <span class="kachel-icon">📝</span>
+                <span>Klausuren</span>
+            </a>
+            <a href="#nachschreibtermine" class="kachel">
+                <span class="kachel-icon">🔄</span>
+                <span>Nachschreibtermine</span>
+            </a>` : ''}
+            ${hatRolle('admin', 'stufenleitung') ? `
             <a href="#import" class="kachel">
                 <span class="kachel-icon">📥</span>
                 <span>GoMST importieren</span>
@@ -97,8 +113,8 @@ async function viewStart(el) {
             <a href="#halbjahre" class="kachel">
                 <span class="kachel-icon">📋</span>
                 <span>Halbjahre & Kurse</span>
-            </a>
-        </div>` : ''}
+            </a>` : ''}
+        </div>
     `;
 }
 
@@ -528,8 +544,660 @@ function renderKursTabelle(kurse) {
 }
 
 // ---------------------------------------------------------------------------
+// View: Klausuren
+// ---------------------------------------------------------------------------
+
+async function viewKlausuren(el) {
+    if (!hatRolle('admin', 'stufenleitung', 'lehrkraft')) {
+        el.innerHTML = '<p class="fehler">Kein Zugriff.</p>';
+        return;
+    }
+
+    el.innerHTML = `
+        <h2>Klausuren</h2>
+        <div class="tabs">
+            <button class="tab aktiv" data-tab="uebersicht">Übersicht</button>
+            ${hatRolle('admin', 'stufenleitung') ? `
+            <button class="tab" data-tab="neu">Einzeln anlegen</button>
+            <button class="tab" data-tab="paste">Excel-Import</button>` : ''}
+        </div>
+        <div id="tab-uebersicht" class="tab-inhalt">
+            <p class="lade-text">Wird geladen…</p>
+        </div>
+        ${hatRolle('admin', 'stufenleitung') ? `
+        <div id="tab-neu" class="tab-inhalt versteckt"></div>
+        <div id="tab-paste" class="tab-inhalt versteckt"></div>` : ''}
+    `;
+
+    el.querySelectorAll('.tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            el.querySelectorAll('.tab').forEach(b => b.classList.remove('aktiv'));
+            el.querySelectorAll('.tab-inhalt').forEach(t => t.classList.add('versteckt'));
+            btn.classList.add('aktiv');
+            const ziel = el.querySelector(`#tab-${btn.dataset.tab}`);
+            ziel.classList.remove('versteckt');
+
+            if (btn.dataset.tab === 'uebersicht' && ziel.children.length === 0) {
+                ladeKlausurenUebersicht(ziel);
+            } else if (btn.dataset.tab === 'neu' && ziel.children.length === 0) {
+                ladeKlausurNeuFormular(ziel, () => {
+                    el.querySelector('[data-tab="uebersicht"]').click();
+                });
+            } else if (btn.dataset.tab === 'paste' && ziel.children.length === 0) {
+                ladePasteImport(ziel, () => {
+                    el.querySelector('[data-tab="uebersicht"]').click();
+                });
+            }
+        });
+    });
+
+    // Übersicht sofort laden
+    ladeKlausurenUebersicht(el.querySelector('#tab-uebersicht'));
+}
+
+async function ladeKlausurenUebersicht(el) {
+    el.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+    try {
+        const klausuren = await apiFetch('/klausuren');
+        renderKlausurenUebersicht(el, klausuren);
+    } catch (err) {
+        el.innerHTML = `<p class="fehler">${err.message}</p>`;
+    }
+}
+
+function renderKlausurenUebersicht(el, klausuren) {
+    if (klausuren.length === 0) {
+        el.innerHTML = `<div class="karte"><p>Noch keine Klausuren angelegt.
+            ${hatRolle('admin', 'stufenleitung') ? ' Nutzen Sie "Einzeln anlegen" oder "Excel-Import".' : ''}</p></div>`;
+        return;
+    }
+
+    // Nach Halbjahr gruppieren
+    const gruppen = {};
+    for (const k of klausuren) {
+        const key = `${k.schuljahr}|${k.halbjahr_id}`;
+        if (!gruppen[key]) {
+            gruppen[key] = {
+                label: `${k.stufe} – ${k.schuljahr}, ${k.abschnitt}. Halbjahr`,
+                schuljahr: k.schuljahr,
+                abschnitt: k.abschnitt,
+                items: [],
+            };
+        }
+        gruppen[key].items.push(k);
+    }
+
+    const sortiert = Object.values(gruppen).sort((a, b) =>
+        b.schuljahr.localeCompare(a.schuljahr) || b.abschnitt - a.abschnitt
+    );
+
+    el.innerHTML = sortiert.map(g => `
+        <div class="karte">
+            <h3 class="karte-titel">${escHtml(g.label)}</h3>
+            <table class="klausur-tabelle">
+                <thead>
+                    <tr>
+                        <th>Kurs</th>
+                        <th>Art</th>
+                        <th>Lehrkraft</th>
+                        <th>Datum</th>
+                        <th>Uhrzeit</th>
+                        <th>Dauer</th>
+                        <th>Raum</th>
+                        <th>TN</th>
+                        ${hatRolle('admin', 'stufenleitung') ? '<th></th>' : ''}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${g.items.map(k => renderKlausurZeile(k)).join('')}
+                </tbody>
+            </table>
+        </div>
+    `).join('');
+
+    // Bearbeiten-Buttons
+    if (hatRolle('admin', 'stufenleitung')) {
+        el.querySelectorAll('.btn-klausur-bearbeiten').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = parseInt(btn.dataset.id);
+                const k  = klausuren.find(x => x.id === id);
+                if (k) zeigeKlausurBearbeitenDialog(k, () => ladeKlausurenUebersicht(el));
+            });
+        });
+    }
+}
+
+function renderKlausurZeile(k) {
+    const datum   = k.termin_datum    ? formatDatum(k.termin_datum)       : '<span class="fehlend">–</span>';
+    const uhrzeit = k.termin_uhrzeit  ? k.termin_uhrzeit.substring(0, 5)  : '–';
+    const dauer   = k.dauer_minuten   ? `${k.dauer_minuten} min`          : '–';
+    const raum    = k.raum            ? escHtml(k.raum)                   : '–';
+    const lk = k.lehrer_id
+        ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}`
+        : `<span class="fehlend">${escHtml(k.lehrer_kuerzel ?? '–')}</span>`;
+
+    return `
+        <tr>
+            <td>${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : ''}</td>
+            <td>${escHtml(k.kursart)}</td>
+            <td>${lk}</td>
+            <td>${datum}</td>
+            <td>${uhrzeit}</td>
+            <td>${dauer}</td>
+            <td>${raum}</td>
+            <td>${k.schueler_anzahl}</td>
+            ${hatRolle('admin', 'stufenleitung') ? `<td><button class="btn btn-klein btn-sekundaer btn-klausur-bearbeiten" data-id="${k.id}">Bearbeiten</button></td>` : ''}
+        </tr>`;
+}
+
+function zeigeKlausurBearbeitenDialog(k, nachSpeichern) {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+        <div class="dialog">
+            <h3>Klausur bearbeiten</h3>
+            <p class="dialog-kursname">${escHtml(k.kurs_anzeigename)}</p>
+            <div class="formular-gruppe">
+                <label>Datum</label>
+                <input type="date" id="dlg-datum" value="${k.termin_datum ?? ''}">
+            </div>
+            <div class="formular-gruppe">
+                <label>Uhrzeit</label>
+                <input type="time" id="dlg-uhrzeit" value="${k.termin_uhrzeit ? k.termin_uhrzeit.substring(0,5) : ''}">
+            </div>
+            <div class="formular-gruppe">
+                <label>Dauer (Minuten)</label>
+                <input type="number" id="dlg-dauer" min="1" max="600" value="${k.dauer_minuten ?? ''}">
+            </div>
+            <div class="formular-gruppe">
+                <label>Raum</label>
+                <input type="text" id="dlg-raum" value="${escHtml(k.raum ?? '')}">
+            </div>
+            <div class="dialog-aktionen">
+                <button class="btn" id="dlg-speichern">Speichern</button>
+                <button class="btn btn-sekundaer" id="dlg-abbrechen">Abbrechen</button>
+            </div>
+            <p id="dlg-fehler" class="fehler" style="display:none"></p>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#dlg-abbrechen').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelector('#dlg-speichern').addEventListener('click', async () => {
+        const btn = overlay.querySelector('#dlg-speichern');
+        const fehlerEl = overlay.querySelector('#dlg-fehler');
+        btn.disabled = true;
+        fehlerEl.style.display = 'none';
+
+        try {
+            await apiFetch(`/klausuren/${k.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    termin_datum:    overlay.querySelector('#dlg-datum').value   || null,
+                    termin_uhrzeit:  overlay.querySelector('#dlg-uhrzeit').value || null,
+                    dauer_minuten:   parseInt(overlay.querySelector('#dlg-dauer').value) || null,
+                    raum:            overlay.querySelector('#dlg-raum').value    || null,
+                }),
+            });
+            overlay.remove();
+            nachSpeichern();
+        } catch (err) {
+            fehlerEl.textContent = err.message;
+            fehlerEl.style.display = '';
+            btn.disabled = false;
+        }
+    });
+}
+
+async function ladeKlausurNeuFormular(el, nachSpeichern) {
+    el.innerHTML = '<p class="lade-text">Kursliste wird geladen…</p>';
+    try {
+        const kurse = await apiFetch('/kurse');
+        renderKlausurNeuFormular(el, kurse, nachSpeichern);
+    } catch (err) {
+        el.innerHTML = `<p class="fehler">${err.message}</p>`;
+    }
+}
+
+function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
+    // Kurse nach Schuljahr/Halbjahr gruppieren
+    const gruppen = {};
+    for (const k of kurse) {
+        const key = `${k.schuljahr} / ${k.abschnitt}. HJ`;
+        (gruppen[key] ??= []).push(k);
+    }
+
+    const optionen = Object.entries(gruppen).map(([gruppe, ks]) =>
+        `<optgroup label="${escHtml(gruppe)}">
+            ${ks.map(k => `<option value="${k.id}">${escHtml(k.anzeigename)}</option>`).join('')}
+        </optgroup>`
+    ).join('');
+
+    el.innerHTML = `
+        <div class="karte" style="max-width:520px">
+            <h3>Neue Klausur anlegen</h3>
+            <div class="formular-gruppe">
+                <label for="neu-kurs">Kurs *</label>
+                <select id="neu-kurs" class="select-zuordnung" style="max-width:100%">
+                    <option value="">– Kurs wählen –</option>
+                    ${optionen}
+                </select>
+            </div>
+            <div class="formular-gruppe">
+                <label for="neu-datum">Datum</label>
+                <input type="date" id="neu-datum">
+            </div>
+            <div class="formular-gruppe">
+                <label for="neu-uhrzeit">Uhrzeit</label>
+                <input type="time" id="neu-uhrzeit">
+            </div>
+            <div class="formular-gruppe">
+                <label for="neu-dauer">Dauer (Minuten)</label>
+                <input type="number" id="neu-dauer" min="1" max="600" placeholder="z.B. 90">
+            </div>
+            <div class="formular-gruppe">
+                <label for="neu-raum">Raum</label>
+                <input type="text" id="neu-raum" placeholder="z.B. Aula">
+            </div>
+            <div class="formular-zeile">
+                <button class="btn" id="neu-speichern">Klausur anlegen</button>
+            </div>
+            <p id="neu-fehler" class="fehler" style="display:none"></p>
+            <p id="neu-ok" class="ok-text" style="display:none"></p>
+        </div>
+    `;
+
+    el.querySelector('#neu-speichern').addEventListener('click', async () => {
+        const btn     = el.querySelector('#neu-speichern');
+        const fehlerEl = el.querySelector('#neu-fehler');
+        const okEl    = el.querySelector('#neu-ok');
+        const kursId  = parseInt(el.querySelector('#neu-kurs').value);
+
+        fehlerEl.style.display = 'none';
+        okEl.style.display = 'none';
+
+        if (!kursId) {
+            fehlerEl.textContent = 'Bitte einen Kurs auswählen.';
+            fehlerEl.style.display = '';
+            return;
+        }
+
+        btn.disabled = true;
+        try {
+            await apiFetch('/klausuren', {
+                method: 'POST',
+                body: JSON.stringify({
+                    kurs_id:        kursId,
+                    termin_datum:   el.querySelector('#neu-datum').value   || null,
+                    termin_uhrzeit: el.querySelector('#neu-uhrzeit').value || null,
+                    dauer_minuten:  parseInt(el.querySelector('#neu-dauer').value) || null,
+                    raum:           el.querySelector('#neu-raum').value    || null,
+                }),
+            });
+            okEl.textContent = '✓ Klausur angelegt.';
+            okEl.style.display = '';
+            // Formular zurücksetzen
+            el.querySelector('#neu-kurs').value   = '';
+            el.querySelector('#neu-datum').value  = '';
+            el.querySelector('#neu-uhrzeit').value = '';
+            el.querySelector('#neu-dauer').value  = '';
+            el.querySelector('#neu-raum').value   = '';
+        } catch (err) {
+            fehlerEl.textContent = err.message;
+            fehlerEl.style.display = '';
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
+function ladePasteImport(el, nachImport) {
+    el.innerHTML = `
+        <div class="karte">
+            <h3>Excel-Import</h3>
+            <p>
+                Markieren Sie in Excel die gesamte Tabelle inkl. Kopfzeile und kopieren Sie sie (Strg+C).
+                Klicken Sie dann in das Textfeld und fügen Sie ein (Strg+V).
+            </p>
+            <p>Erwartete Spalten: <code>Kurs</code>, <code>Datum</code>, <code>Uhrzeit</code>, <code>Dauer</code>, <code>Raum</code>
+            (Reihenfolge egal, Datum im Format TT.MM.JJJJ)</p>
+            <textarea id="paste-feld" class="paste-textarea" placeholder="Hier einfügen (Strg+V)…" rows="10"></textarea>
+            <div id="paste-vorschau"></div>
+        </div>
+    `;
+
+    el.querySelector('#paste-feld').addEventListener('input', () => {
+        const text = el.querySelector('#paste-feld').value.trim();
+        if (text) parsePasteVorschau(text, el.querySelector('#paste-vorschau'), nachImport);
+        else el.querySelector('#paste-vorschau').innerHTML = '';
+    });
+}
+
+function parsePasteVorschau(text, vorschauEl, nachImport) {
+    const zeilen = text.split('\n').filter(z => z.trim() !== '');
+    if (zeilen.length < 2) {
+        vorschauEl.innerHTML = '<p class="hinweis">Mindestens eine Kopfzeile und eine Datenzeile erforderlich.</p>';
+        return;
+    }
+
+    const header = zeilen[0].split('\t').map(h => h.trim().toLowerCase());
+    const felder  = ['kurs', 'datum', 'uhrzeit', 'dauer', 'raum'];
+    const fehlendeFelder = ['kurs'].filter(f => !header.includes(f));
+
+    if (fehlendeFelder.length > 0) {
+        vorschauEl.innerHTML = `<p class="fehler">Pflichtfeld fehlt: ${fehlendeFelder.join(', ')}</p>`;
+        return;
+    }
+
+    const daten = zeilen.slice(1).map(z => {
+        const werte = z.split('\t');
+        const obj = {};
+        header.forEach((h, i) => { obj[h] = (werte[i] ?? '').trim(); });
+        return obj;
+    });
+
+    // Vorschau-Tabelle
+    const zeileHtml = daten.map((d, i) => `
+        <tr>
+            <td>${i + 1}</td>
+            <td>${escHtml(d.kurs ?? '')}</td>
+            <td>${escHtml(d.datum ?? '')}</td>
+            <td>${escHtml(d.uhrzeit ?? '')}</td>
+            <td>${escHtml(d.dauer ?? '')}</td>
+            <td>${escHtml(d.raum ?? '')}</td>
+        </tr>`).join('');
+
+    vorschauEl.innerHTML = `
+        <div class="tabelle-wrapper" style="margin-top:1rem">
+            <p class="tabelle-hinweis">${daten.length} Zeile(n) erkannt. Vorschau:</p>
+            <table class="klausur-tabelle">
+                <thead><tr><th>#</th><th>Kurs</th><th>Datum</th><th>Uhrzeit</th><th>Dauer</th><th>Raum</th></tr></thead>
+                <tbody>${zeileHtml}</tbody>
+            </table>
+        </div>
+        <div style="margin-top:1rem">
+            <button class="btn" id="paste-importieren">Importieren</button>
+        </div>
+        <div id="paste-ergebnis"></div>
+    `;
+
+    vorschauEl.querySelector('#paste-importieren').addEventListener('click', async () => {
+        const btn = vorschauEl.querySelector('#paste-importieren');
+        const ergebnisEl = vorschauEl.querySelector('#paste-ergebnis');
+        btn.disabled = true;
+        btn.textContent = 'Wird importiert…';
+        ergebnisEl.innerHTML = '';
+
+        try {
+            const res = await apiFetch('/klausuren/paste-import', {
+                method: 'POST',
+                body: JSON.stringify(daten),
+            });
+
+            let html = `<div class="ergebnis-box ergebnis-ok">
+                <strong>Import abgeschlossen</strong>
+                <ul>
+                    <li>${res.erstellt} Klausur(en) neu angelegt</li>
+                    <li>${res.aktualisiert} Klausur(en) aktualisiert</li>
+                </ul>`;
+
+            if (res.fehler?.length > 0) {
+                html += `<p><strong>${res.fehler.length} Fehler:</strong></p><ul>`;
+                res.fehler.forEach(f => {
+                    html += `<li>Zeile ${f.zeile}: ${escHtml(f.meldung)}</li>`;
+                });
+                html += '</ul>';
+            }
+
+            html += `<a href="#klausuren" class="btn btn-sekundaer" style="margin-top:.5rem">Zur Übersicht →</a></div>`;
+            ergebnisEl.innerHTML = html;
+        } catch (err) {
+            ergebnisEl.innerHTML = `<p class="fehler">${err.message}</p>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Importieren';
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// View: Nachschreibtermine
+// ---------------------------------------------------------------------------
+
+async function viewNachschreibtermine(el) {
+    if (!hatRolle('admin', 'stufenleitung', 'lehrkraft')) {
+        el.innerHTML = '<p class="fehler">Kein Zugriff.</p>';
+        return;
+    }
+
+    el.innerHTML = `
+        <h2>Nachschreibtermine</h2>
+        ${hatRolle('admin', 'stufenleitung') ? `
+        <div style="margin-bottom:1rem">
+            <button class="btn" id="nt-neu-btn">+ Neuer Nachschreibtermin</button>
+        </div>
+        <div id="nt-neu-formular" class="versteckt"></div>` : ''}
+        <div id="nt-liste"><p class="lade-text">Wird geladen…</p></div>
+    `;
+
+    ladeNachschreibtermine(el.querySelector('#nt-liste'));
+
+    if (hatRolle('admin', 'stufenleitung')) {
+        el.querySelector('#nt-neu-btn').addEventListener('click', () => {
+            const formEl = el.querySelector('#nt-neu-formular');
+            formEl.classList.toggle('versteckt');
+            if (!formEl.classList.contains('versteckt') && formEl.children.length === 0) {
+                renderNachschreibterminFormular(formEl, null, () => {
+                    formEl.classList.add('versteckt');
+                    formEl.innerHTML = '';
+                    ladeNachschreibtermine(el.querySelector('#nt-liste'));
+                });
+            }
+        });
+    }
+}
+
+async function ladeNachschreibtermine(el) {
+    el.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+    try {
+        const termine = await apiFetch('/nachschreibtermine');
+        renderNachschreibtermineList(el, termine);
+    } catch (err) {
+        el.innerHTML = `<p class="fehler">${err.message}</p>`;
+    }
+}
+
+function renderNachschreibtermineList(el, termine) {
+    if (termine.length === 0) {
+        el.innerHTML = '<div class="karte"><p>Noch keine Nachschreibtermine angelegt.</p></div>';
+        return;
+    }
+
+    el.innerHTML = termine.map(t => {
+        const datum   = t.termin_datum   ? formatDatum(t.termin_datum)        : '–';
+        const uhrzeit = t.termin_uhrzeit ? t.termin_uhrzeit.substring(0, 5)   : '–';
+
+        const klausurenHtml = t.klausuren.length > 0
+            ? t.klausuren.map(k => `<span class="klausur-tag">${escHtml(k.kurs_anzeigename)}</span>`).join(' ')
+            : '<span class="hinweis">Keine Klausuren verknüpft</span>';
+
+        return `
+        <div class="karte nt-karte" data-id="${t.id}">
+            <div class="nt-kopf">
+                <span class="nt-datum">${datum}, ${uhrzeit} Uhr${t.raum ? ' – ' + escHtml(t.raum) : ''}</span>
+                ${hatRolle('admin', 'stufenleitung') ? `
+                <div class="nt-aktionen">
+                    <button class="btn btn-klein btn-sekundaer btn-nt-bearbeiten" data-id="${t.id}">Bearbeiten</button>
+                    <button class="btn btn-klein btn-sekundaer btn-nt-klausuren" data-id="${t.id}">Klausuren verknüpfen</button>
+                </div>` : ''}
+            </div>
+            ${t.bemerkung ? `<p class="nt-bemerkung">${escHtml(t.bemerkung)}</p>` : ''}
+            <div class="nt-klausuren">${klausurenHtml}</div>
+            <div class="nt-edit-bereich versteckt"></div>
+        </div>`;
+    }).join('');
+
+    // Bearbeiten
+    el.querySelectorAll('.btn-nt-bearbeiten').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id    = parseInt(btn.dataset.id);
+            const karte = el.querySelector(`.nt-karte[data-id="${id}"]`);
+            const bereich = karte.querySelector('.nt-edit-bereich');
+            bereich.classList.toggle('versteckt');
+            if (!bereich.classList.contains('versteckt') && bereich.children.length === 0) {
+                const t = termine.find(x => x.id === id);
+                renderNachschreibterminFormular(bereich, t, () => {
+                    bereich.classList.add('versteckt');
+                    bereich.innerHTML = '';
+                    ladeNachschreibtermine(el);
+                });
+            }
+        });
+    });
+
+    // Klausuren verknüpfen
+    el.querySelectorAll('.btn-nt-klausuren').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id    = parseInt(btn.dataset.id);
+            const karte = el.querySelector(`.nt-karte[data-id="${id}"]`);
+            const bereich = karte.querySelector('.nt-edit-bereich');
+            bereich.classList.toggle('versteckt');
+            if (!bereich.classList.contains('versteckt') && bereich.children.length === 0) {
+                bereich.innerHTML = '<p class="lade-text">Klausuren werden geladen…</p>';
+                try {
+                    const alleKlausuren = await apiFetch('/klausuren');
+                    const t = termine.find(x => x.id === id);
+                    renderKlausurVerknuepfung(bereich, id, alleKlausuren, t.klausuren, () => {
+                        bereich.classList.add('versteckt');
+                        bereich.innerHTML = '';
+                        ladeNachschreibtermine(el);
+                    });
+                } catch (err) {
+                    bereich.innerHTML = `<p class="fehler">${err.message}</p>`;
+                }
+            }
+        });
+    });
+}
+
+function renderNachschreibterminFormular(el, vorhandener, nachSpeichern) {
+    const istNeu = vorhandener === null;
+    el.innerHTML = `
+        <div class="nt-formular">
+            <div class="formular-gruppe">
+                <label>Datum</label>
+                <input type="date" class="nt-datum" value="${vorhandener?.termin_datum ?? ''}">
+            </div>
+            <div class="formular-gruppe">
+                <label>Uhrzeit</label>
+                <input type="time" class="nt-uhrzeit" value="${vorhandener?.termin_uhrzeit ? vorhandener.termin_uhrzeit.substring(0,5) : ''}">
+            </div>
+            <div class="formular-gruppe">
+                <label>Raum</label>
+                <input type="text" class="nt-raum" value="${escHtml(vorhandener?.raum ?? '')}">
+            </div>
+            <div class="formular-gruppe">
+                <label>Bemerkung</label>
+                <input type="text" class="nt-bemerkung" value="${escHtml(vorhandener?.bemerkung ?? '')}">
+            </div>
+            <div class="formular-zeile">
+                <button class="btn nt-speichern">${istNeu ? 'Anlegen' : 'Speichern'}</button>
+                <button class="btn btn-sekundaer nt-abbrechen">Abbrechen</button>
+            </div>
+            <p class="nt-fehler fehler" style="display:none"></p>
+        </div>
+    `;
+
+    el.querySelector('.nt-abbrechen').addEventListener('click', () => nachSpeichern());
+
+    el.querySelector('.nt-speichern').addEventListener('click', async () => {
+        const btn     = el.querySelector('.nt-speichern');
+        const fehlerEl = el.querySelector('.nt-fehler');
+        btn.disabled = true;
+        fehlerEl.style.display = 'none';
+
+        const body = {
+            termin_datum:    el.querySelector('.nt-datum').value    || null,
+            termin_uhrzeit:  el.querySelector('.nt-uhrzeit').value  || null,
+            raum:            el.querySelector('.nt-raum').value     || null,
+            bemerkung:       el.querySelector('.nt-bemerkung').value || null,
+        };
+
+        try {
+            if (istNeu) {
+                await apiFetch('/nachschreibtermine', { method: 'POST', body: JSON.stringify(body) });
+            } else {
+                await apiFetch(`/nachschreibtermine/${vorhandener.id}`, { method: 'PUT', body: JSON.stringify(body) });
+            }
+            nachSpeichern();
+        } catch (err) {
+            fehlerEl.textContent = err.message;
+            fehlerEl.style.display = '';
+            btn.disabled = false;
+        }
+    });
+}
+
+function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, nachSpeichern) {
+    const bereitsIds = new Set(bereitsVerknuepft.map(k => k.id));
+
+    const zeilen = alleKlausuren.map(k => `
+        <label class="check-zeile">
+            <input type="checkbox" value="${k.id}" ${bereitsIds.has(k.id) ? 'checked' : ''}>
+            ${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` (Nr. ${k.klausur_nr})` : ''}
+            <span class="hinweis">${k.termin_datum ? ' – ' + formatDatum(k.termin_datum) : ''}</span>
+        </label>
+    `).join('');
+
+    el.innerHTML = `
+        <div class="nt-formular">
+            <p><strong>Klausuren für diesen Nachschreibtermin:</strong></p>
+            <div class="check-liste">${zeilen || '<p class="hinweis">Keine Klausuren vorhanden.</p>'}</div>
+            <div class="formular-zeile" style="margin-top:.75rem">
+                <button class="btn nt-kl-speichern">Speichern</button>
+                <button class="btn btn-sekundaer nt-kl-abbrechen">Abbrechen</button>
+            </div>
+            <p class="nt-fehler fehler" style="display:none"></p>
+        </div>
+    `;
+
+    el.querySelector('.nt-kl-abbrechen').addEventListener('click', () => nachSpeichern());
+
+    el.querySelector('.nt-kl-speichern').addEventListener('click', async () => {
+        const btn = el.querySelector('.nt-kl-speichern');
+        const fehlerEl = el.querySelector('.nt-fehler');
+        btn.disabled = true;
+        fehlerEl.style.display = 'none';
+
+        const ausgewaehlte = [...el.querySelectorAll('.check-liste input:checked')]
+            .map(cb => parseInt(cb.value));
+
+        try {
+            await apiFetch(`/nachschreibtermine/${ntId}/klausuren`, {
+                method: 'POST',
+                body: JSON.stringify({ klausur_ids: ausgewaehlte }),
+            });
+            nachSpeichern();
+        } catch (err) {
+            fehlerEl.textContent = err.message;
+            fehlerEl.style.display = '';
+            btn.disabled = false;
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Hilfs­funktionen
 // ---------------------------------------------------------------------------
+
+/** YYYY-MM-DD → TT.MM.JJJJ */
+function formatDatum(str) {
+    if (!str) return '–';
+    const [y, m, d] = str.split('-');
+    return `${d}.${m}.${y}`;
+}
 
 function escHtml(str) {
     return String(str ?? '')

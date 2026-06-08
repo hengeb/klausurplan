@@ -377,3 +377,180 @@ main {
 .hinweis { color: #888; font-size: 0.875rem; margin: 0.5rem 0; }
 
 .versteckt { display: none; }
+
+/* ---------------------------------------------------------------------------
+   Klausuren-Tabelle
+--------------------------------------------------------------------------- */
+
+.klausur-tabelle {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.klausur-tabelle th,
+.klausur-tabelle td {
+    padding: 0.45rem 0.7rem;
+    text-align: left;
+    border-bottom: 1px solid #e8edf2;
+}
+
+.klausur-tabelle th {
+    background: #f5f7fa;
+    font-weight: 600;
+    color: #333;
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+
+.klausur-tabelle tr:hover td { background: #fafbfc; }
+
+.klausur-nr { font-size: 0.8rem; color: #888; }
+
+.karte-titel {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    color: #1a3a5c;
+    border-bottom: 1px solid #e8edf2;
+    padding-bottom: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Formulare
+--------------------------------------------------------------------------- */
+
+.formular-gruppe {
+    margin-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.formular-gruppe label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #444;
+}
+
+.formular-gruppe input[type="date"],
+.formular-gruppe input[type="time"],
+.formular-gruppe input[type="number"],
+.formular-gruppe input[type="text"] {
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #c8cdd5;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    max-width: 280px;
+}
+
+/* ---------------------------------------------------------------------------
+   Paste-Textarea
+--------------------------------------------------------------------------- */
+
+.paste-textarea {
+    width: 100%;
+    padding: 0.6rem;
+    border: 2px dashed #c8cdd5;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.8125rem;
+    resize: vertical;
+    transition: border-color .15s;
+}
+
+.paste-textarea:focus {
+    outline: none;
+    border-color: #1a3a5c;
+}
+
+/* ---------------------------------------------------------------------------
+   Dialog (Bearbeiten-Overlay)
+--------------------------------------------------------------------------- */
+
+.dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+
+.dialog {
+    background: #fff;
+    border-radius: 8px;
+    padding: 1.5rem;
+    min-width: 360px;
+    max-width: 480px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.18);
+}
+
+.dialog h3 { margin: 0 0 0.25rem; }
+
+.dialog-kursname { color: #555; font-size: 0.875rem; margin: 0 0 1rem; }
+
+.dialog-aktionen { display: flex; gap: 0.5rem; margin-top: 1rem; }
+
+/* ---------------------------------------------------------------------------
+   Nachschreibtermine
+--------------------------------------------------------------------------- */
+
+.nt-karte { margin-bottom: 0.75rem; }
+
+.nt-kopf {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.nt-datum { font-weight: 600; font-size: 0.9375rem; }
+
+.nt-aktionen { display: flex; gap: 0.4rem; flex-shrink: 0; }
+
+.nt-bemerkung { color: #555; font-size: 0.875rem; margin: 0.4rem 0 0; }
+
+.nt-klausuren {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.klausur-tag {
+    background: #e8edf2;
+    color: #1a3a5c;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.8125rem;
+}
+
+.nt-formular {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #e8edf2;
+}
+
+.check-liste {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid #e8edf2;
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+}
+
+.check-zeile {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+}
+
+.check-zeile input[type="checkbox"] { flex-shrink: 0; }
