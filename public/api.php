@@ -6,6 +6,7 @@ use Klausurplan\Auth\Session;
 use Klausurplan\Api\Router;
 use Klausurplan\Api\MeController;
 use Klausurplan\Api\AdminApi;
+use Klausurplan\Api\StufenleitungApi;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -66,6 +67,37 @@ $router->put('/admin/faecher/{kuerzel}', function (array $p): array {
     }
     return AdminApi::updateFach($p['kuerzel'], $bezeichnung);
 }, 'admin');
+
+// ------------------------------------------------------------------
+// Stufenleitung – GoMST-Import
+// ------------------------------------------------------------------
+// Datei-Upload: multipart/form-data, Feld "datei"
+$router->post('/stufenleitung/gomst-import', function (): array {
+    return StufenleitungApi::gomstImport();
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Stufenleitung – Zuordnungen
+// ------------------------------------------------------------------
+$router->get('/stufenleitung/zuordnungen', function (): array {
+    return StufenleitungApi::getZuordnungen();
+}, 'admin', 'stufenleitung');
+
+$router->post('/stufenleitung/zuordnungen', function (): array {
+    $body = Router::jsonBody();
+    return StufenleitungApi::postZuordnung($body);
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Stufenleitung – Halbjahre & Kurse
+// ------------------------------------------------------------------
+$router->get('/stufenleitung/halbjahre', function (): array {
+    return StufenleitungApi::getHalbjahre();
+}, 'admin', 'stufenleitung');
+
+$router->get('/stufenleitung/halbjahre/{id}/kurse', function (array $p): array {
+    return StufenleitungApi::getKurse((int) $p['id']);
+}, 'admin', 'stufenleitung');
 
 // ------------------------------------------------------------------
 

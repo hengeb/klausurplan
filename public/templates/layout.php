@@ -18,8 +18,8 @@ $rollen   = $benutzer['rollen'] ?? [];
         <h1>Klausurplan</h1>
         <span class="nutzer"><?= $vorname ?> <?= $nachname ?></span>
     </header>
+    <nav id="nav"></nav>
     <main id="app">
-        <!-- JavaScript lädt die Inhalte nach -->
         <p>Wird geladen…</p>
     </main>
     <script>

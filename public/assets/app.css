@@ -1,38 +1,379 @@
-/* Klausurplan – Basis-Stylesheet (Phase 7 vervollständigt) */
+/* Klausurplan – Stylesheet */
 
-*, *::before, *::after {
-    box-sizing: border-box;
-}
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
     font-family: system-ui, -apple-system, sans-serif;
     margin: 0;
     padding: 0;
     color: #222;
-    background: #f5f5f5;
+    background: #f0f2f5;
+    font-size: 0.9375rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Layout
+--------------------------------------------------------------------------- */
 
 header {
     background: #1a3a5c;
     color: #fff;
-    padding: 0.75rem 1.5rem;
+    padding: 0.65rem 1.5rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 4px rgba(0,0,0,.2);
 }
 
 header h1 {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: .02em;
 }
 
 .nutzer {
-    font-size: 0.875rem;
-    opacity: 0.85;
+    font-size: 0.8125rem;
+    opacity: 0.8;
 }
+
+nav#nav {
+    background: #fff;
+    border-bottom: 1px solid #d8dce2;
+    padding: 0 1.5rem;
+    display: flex;
+    gap: 0;
+}
+
+nav#nav a {
+    display: inline-block;
+    padding: 0.65rem 1rem;
+    text-decoration: none;
+    color: #444;
+    font-size: 0.875rem;
+    border-bottom: 3px solid transparent;
+    transition: color .15s, border-color .15s;
+}
+
+nav#nav a:hover { color: #1a3a5c; }
+nav#nav a.aktiv { color: #1a3a5c; border-bottom-color: #1a3a5c; font-weight: 600; }
 
 main {
     max-width: 1200px;
-    margin: 2rem auto;
-    padding: 0 1rem;
+    margin: 1.5rem auto;
+    padding: 0 1.25rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Karten & Kacheln
+--------------------------------------------------------------------------- */
+
+.karte {
+    background: #fff;
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    margin-bottom: 1.25rem;
+}
+
+.kacheln {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+}
+
+.kachel {
+    background: #fff;
+    border-radius: 8px;
+    padding: 1.5rem 2rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    text-decoration: none;
+    color: #222;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    min-width: 140px;
+    transition: box-shadow .15s, transform .1s;
+}
+
+.kachel:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,.12);
+    transform: translateY(-2px);
+}
+
+.kachel-icon { font-size: 2rem; }
+
+/* ---------------------------------------------------------------------------
+   Schaltflächen
+--------------------------------------------------------------------------- */
+
+.btn {
+    display: inline-block;
+    padding: 0.45rem 1.1rem;
+    background: #1a3a5c;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background .15s;
+}
+
+.btn:hover:not(:disabled) { background: #14304f; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-sekundaer {
+    background: #e8edf2;
+    color: #1a3a5c;
+}
+.btn-sekundaer:hover:not(:disabled) { background: #d4dce6; }
+
+.btn-klein {
+    padding: 0.3rem 0.7rem;
+    font-size: 0.8125rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Formulare
+--------------------------------------------------------------------------- */
+
+.formular-zeile {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.datei-name-text {
+    font-size: 0.875rem;
+    color: #555;
+}
+
+/* ---------------------------------------------------------------------------
+   Tabs
+--------------------------------------------------------------------------- */
+
+.tabs {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 2px solid #d8dce2;
+    margin-bottom: 1.25rem;
+}
+
+.tab {
+    background: none;
+    border: none;
+    padding: 0.6rem 1.25rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    color: #555;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color .15s;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.tab:hover { color: #1a3a5c; }
+.tab.aktiv { color: #1a3a5c; border-bottom-color: #1a3a5c; font-weight: 600; }
+
+.badge {
+    background: #c0392b;
+    color: #fff;
+    border-radius: 10px;
+    padding: 0 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.tab-inhalt.versteckt { display: none; }
+
+/* ---------------------------------------------------------------------------
+   Tabellen
+--------------------------------------------------------------------------- */
+
+.tabelle-wrapper { overflow-x: auto; }
+
+.tabelle-hinweis {
+    margin: 0 0 0.75rem;
+    color: #555;
+    font-size: 0.875rem;
+}
+
+.zuordnungs-tabelle,
+.kurs-tabelle {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.zuordnungs-tabelle th,
+.zuordnungs-tabelle td,
+.kurs-tabelle th,
+.kurs-tabelle td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #e8edf2;
+}
+
+.zuordnungs-tabelle th,
+.kurs-tabelle th {
+    background: #f5f7fa;
+    font-weight: 600;
+    color: #333;
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+
+.zuordnungs-tabelle tr:hover td { background: #fafbfc; }
+.zuordnungs-tabelle tr.zugeordnet td { color: #888; }
+
+.select-zuordnung {
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid #c8cdd5;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    background: #fff;
+    max-width: 300px;
+}
+
+.zuordnung-status {
+    color: #27ae60;
+    font-size: 0.8125rem;
+    margin-left: 0.4rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Accordion (Halbjahre)
+--------------------------------------------------------------------------- */
+
+.accordion { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.accordion-item {
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    overflow: hidden;
+}
+
+.accordion-kopf {
+    width: 100%;
+    padding: 0.9rem 1.25rem;
+    background: #fff;
+    border: none;
+    text-align: left;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #1a3a5c;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background .15s;
+}
+
+.accordion-kopf:hover { background: #f5f7fa; }
+.accordion-kopf.offen { border-bottom: 1px solid #e8edf2; }
+
+.accordion-anzahl {
+    font-size: 0.8125rem;
+    font-weight: 400;
+    color: #888;
+}
+
+.accordion-body {
+    padding: 1rem 1.25rem;
+}
+
+.accordion-body.versteckt { display: none; }
+
+.hj-block {
+    margin-bottom: 1.25rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #eef1f5;
+}
+
+.hj-block:last-child { border-bottom: none; margin-bottom: 0; }
+
+.hj-block h4 {
+    margin: 0 0 0.6rem;
+    font-size: 0.9rem;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.hj-meta {
+    font-size: 0.8125rem;
+    font-weight: 400;
+    color: #888;
+}
+
+.kurs-liste { margin-top: 0.75rem; }
+
+/* ---------------------------------------------------------------------------
+   Ampel-Indikator
+--------------------------------------------------------------------------- */
+
+.ampel {
+    display: inline-block;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    margin-right: 0.3rem;
+    vertical-align: middle;
+}
+
+.ampel-gruen  { background: #27ae60; }
+.ampel-gelb   { background: #f39c12; }
+.ampel-rot    { background: #e74c3c; }
+.ampel-grau   { background: #bbb; }
+
+/* ---------------------------------------------------------------------------
+   Ergebnis-Boxen & Status
+--------------------------------------------------------------------------- */
+
+.ergebnis-box {
+    margin-top: 1rem;
+    padding: 1rem 1.25rem;
+    border-radius: 4px;
+}
+
+.ergebnis-ok {
+    background: #eafaf1;
+    border: 1px solid #a9dfbf;
+    color: #1e8449;
+}
+
+.ergebnis-ok ul { margin: 0.5rem 0 0.75rem 1.25rem; }
+
+.fehler {
+    color: #c0392b;
+    background: #fdf0ee;
+    border: 1px solid #f5c6c0;
+    padding: 0.6rem 1rem;
+    border-radius: 4px;
+}
+
+.ok-text { color: #27ae60; }
+
+.lade-text { color: #888; font-style: italic; }
+
+.fehlend { color: #c0392b; }
+
+.hinweis { color: #888; font-size: 0.875rem; margin: 0.5rem 0; }
+
+.versteckt { display: none; }
