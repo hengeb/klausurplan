@@ -180,5 +180,12 @@ $router->post('/stufenleitung/entschuldigung/{anwesenheit_id}', function (array 
 }, 'admin', 'stufenleitung');
 
 // ------------------------------------------------------------------
+// Stufenleitung – E-Mail manuell auslösen
+// ------------------------------------------------------------------
+$router->post('/stufenleitung/email-ausloesen/{klausur_id}', function (array $p): array {
+    return StufenleitungApi::emailAusloesen((int) $p['klausur_id']);
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
 
 $router->dispatch();

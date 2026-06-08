@@ -719,6 +719,29 @@ function renderKlausurenUebersicht(el, klausuren) {
             if (k) zeigeAnwesenheitDialog(k);
         });
     });
+
+    // E-Mail-Buttons (admin/SL)
+    el.querySelectorAll('.btn-email-ausloesen').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = parseInt(btn.dataset.id);
+            const k  = klausuren.find(x => x.id === id);
+            const kursname = k ? k.kurs_anzeigename : `Klausur ${id}`;
+
+            if (!confirm(`Anwesenheits-E-Mail für „${kursname}" jetzt senden?`)) return;
+
+            btn.disabled    = true;
+            btn.textContent = '…';
+            try {
+                const res = await apiFetch(`/stufenleitung/email-ausloesen/${id}`, { method: 'POST' });
+                alert(`E-Mail wurde gesendet an: ${res.empfaenger}`);
+            } catch (err) {
+                alert(`Fehler: ${err.message}`);
+            } finally {
+                btn.disabled    = false;
+                btn.textContent = 'E-Mail';
+            }
+        });
+    });
 }
 
 function renderKlausurZeile(k) {
@@ -733,11 +756,14 @@ function renderKlausurZeile(k) {
     const aktionen = [];
     if (hatRolle('admin', 'stufenleitung')) {
         aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-klausur-bearbeiten" data-id="${k.id}">Bearbeiten</button>`);
+        if (k.lehrer_id) {
+            aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-email-ausloesen" data-id="${k.id}" title="Anwesenheits-E-Mail senden">E-Mail</button>`);
+        }
     }
     aktionen.push(`<button class="btn btn-klein btn-anwesenheit" data-id="${k.id}">Anwesenheit</button>`);
 
     return `
-        <tr>
+        <tr data-klausur-id="${k.id}">
             <td>${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : ''}</td>
             <td>${escHtml(k.kursart)}</td>
             <td>${lk}</td>
@@ -746,7 +772,7 @@ function renderKlausurZeile(k) {
             <td>${dauer}</td>
             <td>${raum}</td>
             <td>${k.schueler_anzahl}</td>
-            <td>${renderAnwesenheitStatus(k.anwesenheit_erfasst, k.schueler_anzahl)}</td>
+            <td class="td-aw-status">${renderAnwesenheitStatus(k.anwesenheit_erfasst, k.schueler_anzahl)}</td>
             <td class="td-aktionen">${aktionen.join(' ')}</td>
         </tr>`;
 }
@@ -1193,8 +1219,17 @@ async function zeigeAnwesenheitDialog(klausur) {
                 method:  'POST',
                 body:    JSON.stringify(eintraegePut),
             });
-            okEl.textContent  = `✓ ${res.gespeichert} Eintrag/Einträge gespeichert.`;
+            okEl.textContent   = `✓ ${res.gespeichert} Eintrag/Einträge gespeichert.`;
             okEl.style.display = '';
+
+            // Anwesenheits-Status in der Übersichtstabelle aktualisieren
+            const erfasst = Object.values(status).filter(s => s.status !== 'ausstehend').length;
+            const gesamt  = Object.keys(status).length;
+            const tr      = document.querySelector(`tr[data-klausur-id="${klausur.id}"]`);
+            if (tr) {
+                tr.querySelector('.td-aw-status').innerHTML =
+                    renderAnwesenheitStatus(erfasst, gesamt);
+            }
         } catch (err) {
             fehlerEl.textContent  = err.message;
             fehlerEl.style.display = '';

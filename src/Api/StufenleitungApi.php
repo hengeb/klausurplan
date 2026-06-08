@@ -6,6 +6,8 @@ namespace Klausurplan\Api;
 
 use Klausurplan\Auth\Session;
 use Klausurplan\Import\GomstImporter;
+use Klausurplan\Mail\EmailTemplates;
+use Klausurplan\Mail\Mailer;
 use Klausurplan\Models\Database;
 use RuntimeException;
 
@@ -194,6 +196,75 @@ class StufenleitungApi
              ORDER BY s.schuljahr DESC, s.name, h.abschnitt"
         )->fetchAll();
     }
+
+    // ------------------------------------------------------------------
+    // E-Mail manuell auslösen
+    // ------------------------------------------------------------------
+
+    /**
+     * Sendet eine Anwesenheits-E-Mail für eine Klausur manuell.
+     * Erzeugt immer einen neuen Token (unabhängig von bereits gesendeten Mails).
+     *
+     * @return array{gesendet: bool, empfaenger: string}
+     */
+    public static function emailAusloesen(int $klausurId): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare(
+            "SELECT kl.id, kl.termin_datum, k.anzeigename AS kurs_anzeigename,
+                    b.id AS lehrer_id, b.email, b.vorname, b.nachname
+             FROM klausuren kl
+             JOIN kurse k    ON k.id = kl.kurs_id
+             JOIN benutzer b ON b.id = k.lehrer_id
+             WHERE kl.id = ?"
+        );
+        $stmt->execute([$klausurId]);
+        $kl = $stmt->fetch();
+
+        if ($kl === false) {
+            http_response_code(404);
+            throw new RuntimeException("Klausur {$klausurId} nicht gefunden oder keine Lehrkraft zugeordnet.");
+        }
+
+        if (empty($kl['email'])) {
+            http_response_code(422);
+            throw new RuntimeException('Die zugeordnete Lehrkraft hat keine E-Mail-Adresse hinterlegt.');
+        }
+
+        $token = bin2hex(random_bytes(32));
+
+        $klausurDaten = [
+            'kurs_anzeigename' => $kl['kurs_anzeigename'],
+            'termin_datum'     => $kl['termin_datum'],
+        ];
+
+        $datumStr = $kl['termin_datum']
+            ? date('d.m.Y', strtotime($kl['termin_datum']))
+            : '–';
+        $betreff  = "Anwesenheit Klausur {$kl['kurs_anzeigename']} am {$datumStr}";
+
+        $db->prepare(
+            "INSERT INTO email_benachrichtigungen
+             (klausur_id, empfaenger_id, typ, token, gesendet_am)
+             VALUES (?, ?, 'erstmeldung', ?, NOW())"
+        )->execute([$klausurId, $kl['lehrer_id'], $token]);
+
+        Mailer::send(
+            $kl['email'],
+            trim($kl['vorname'] . ' ' . $kl['nachname']),
+            $betreff,
+            EmailTemplates::erstmeldung($klausurDaten, $token),
+        );
+
+        return [
+            'gesendet'   => true,
+            'empfaenger' => $kl['email'],
+        ];
+    }
+
+    // ------------------------------------------------------------------
 
     /** Kursliste für ein Halbjahr inkl. Schüler*innen-Anzahl und Zuordnungsstatus. */
     public static function getKurse(int $halbjahrId): array
