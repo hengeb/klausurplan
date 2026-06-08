@@ -681,9 +681,11 @@ async function zeigeKursTeilnehmerDialog(kursId, kursName) {
     overlay.querySelector('#tn-schliessen').addEventListener('click', () => overlay.remove());
     schliessbar(overlay);
 
-    async function ladeTeilnehmer() {
+    async function ladeTeilnehmer(stille = false) {
         const inhaltEl = overlay.querySelector('#tn-inhalt');
-        inhaltEl.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+        if (!stille) {
+            inhaltEl.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+        }
         try {
             const eintraege = await apiFetch(`/stufenleitung/kurse/${kursId}/schueler`);
             renderTeilnehmerListe(inhaltEl, eintraege);
@@ -739,7 +741,7 @@ async function zeigeKursTeilnehmerDialog(kursId, kursName) {
                     btn.disabled = true;
                     try {
                         await apiFetch(`/stufenleitung/kurse/${kursId}/zusatz-schueler/${ksId}`, { method: 'DELETE' });
-                        await ladeTeilnehmer();
+                        await ladeTeilnehmer(true);
                     } catch (err) {
                         alert(err.message);
                         btn.disabled = false;
@@ -775,7 +777,7 @@ async function zeigeKursTeilnehmerDialog(kursId, kursName) {
                 infoEl.style.color = '#27ae60';
                 infoEl.textContent = `✓ „${name}" hinzugefügt.`;
                 input.value = '';
-                await ladeTeilnehmer();
+                await ladeTeilnehmer(true);
             } catch (err) {
                 infoEl.style.color = '#c0392b';
                 infoEl.textContent = err.message;
@@ -807,7 +809,7 @@ async function zeigeKursTeilnehmerDialog(kursId, kursName) {
                 infoEl.style.color = '#c0392b';
                 infoEl.textContent = `${hinzugefuegt} hinzugefügt, ${fehler.length} Fehler: ${fehler[0]}`;
             }
-            await ladeTeilnehmer();
+            await ladeTeilnehmer(true);
         });
     }
 
