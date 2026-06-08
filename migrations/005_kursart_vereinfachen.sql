@@ -1,8 +1,9 @@
--- Kursart auf kurse vereinfachen: LK1/LK2 → LK, GKS/AB3/AB4 → GK
+-- Kursart auf kurse vereinfachen: LK1/LK2 → LK, alles andere → GK
 -- Muss laufen BEVOR die ENUM-Definition geändert wird.
 
 UPDATE kurse SET kursart = 'LK' WHERE kursart IN ('LK1', 'LK2');
-UPDATE kurse SET kursart = 'GK' WHERE kursart IN ('GKS', 'AB3', 'AB4');
+-- Catch-all: GKS, AB3, AB4, Leerstring (bei vorzeitig geändertem Importer) → GK
+UPDATE kurse SET kursart = 'GK' WHERE kursart NOT IN ('LK', 'GK');
 
 ALTER TABLE kurse MODIFY COLUMN kursart ENUM('LK', 'GK') NOT NULL;
 
