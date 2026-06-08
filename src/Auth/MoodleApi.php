@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Klausurplan\Auth;
 
 use Klausurplan\Models\Database;
-use PDO;
 use RuntimeException;
 
 class MoodleApi
@@ -39,8 +38,10 @@ class MoodleApi
             $moodleId = (string) $mn['id'];
             $vorname  = trim($mn['firstname'] ?? '');
             $nachname = trim($mn['lastname']  ?? '');
-            $email    = $mn['email']           ?? null;
             $kuerzel  = self::extraktKuerzel($nachname);
+
+            // E-Mail nur für Lehrkräfte importieren (erkennbar am Kürzel im Nachnamen)
+            $email = $kuerzel !== null ? ($mn['email'] ?? null) : null;
 
             if (empty($vorname) || empty($nachname)) {
                 continue;
@@ -57,20 +58,57 @@ class MoodleApi
                 )->execute([$moodleId, $vorname, $nachname, $email, $kuerzel]);
                 $neu++;
             } else {
-                // E-Mail und Kürzel nur überschreiben wenn in Moodle vorhanden
                 $db->prepare(
                     'UPDATE benutzer
                      SET vorname  = ?,
                          nachname = ?,
-                         email    = CASE WHEN ? IS NOT NULL THEN ? ELSE email    END,
-                         kuerzel  = CASE WHEN ? IS NOT NULL THEN ? ELSE kuerzel  END
+                         email    = ?,
+                         kuerzel  = CASE WHEN ? IS NOT NULL THEN ? ELSE kuerzel END
                      WHERE moodle_id = ?'
-                )->execute([$vorname, $nachname, $email, $email, $kuerzel, $kuerzel, $moodleId]);
+                )->execute([$vorname, $nachname, $email, $kuerzel, $kuerzel, $moodleId]);
                 $aktualisiert++;
             }
         }
 
+        $this->bereinigeDoppelteKuerzel($db);
+
         return ['neu' => $neu, 'aktualisiert' => $aktualisiert, 'gesamt' => count($moodleNutzer)];
+    }
+
+    /**
+     * Kommt ein Kürzel mehrfach vor, behält die Person mit der kleinsten Moodle-ID
+     * das Kürzel; bei allen anderen wird es auf NULL gesetzt.
+     */
+    private function bereinigeDoppelteKuerzel(\PDO $db): void
+    {
+        $stmt = $db->query(
+            'SELECT kuerzel FROM benutzer
+             WHERE kuerzel IS NOT NULL
+             GROUP BY kuerzel HAVING COUNT(*) > 1'
+        );
+
+        while (($kuerzel = $stmt->fetchColumn()) !== false) {
+            // Alle Einträge mit diesem Kürzel, ältester zuerst (kleinste numerische Moodle-ID)
+            $dup = $db->prepare(
+                'SELECT id FROM benutzer
+                 WHERE kuerzel = ?
+                 ORDER BY CAST(moodle_id AS UNSIGNED) DESC'
+            );
+            $dup->execute([$kuerzel]);
+
+            $ids = [];
+            while (($id = $dup->fetchColumn()) !== false) {
+                $ids[] = $id;
+            }
+
+            // Ersten (kleinste Moodle-ID) behalten, Rest auf NULL
+            array_shift($ids);
+            if (!empty($ids)) {
+                $platzhalter = implode(',', array_fill(0, count($ids), '?'));
+                $db->prepare("UPDATE benutzer SET kuerzel = NULL WHERE id IN ($platzhalter)")
+                   ->execute($ids);
+            }
+        }
     }
 
     /**
@@ -116,7 +154,6 @@ class MoodleApi
         $body   = curl_exec($ch);
         $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error  = curl_error($ch);
-        curl_close($ch);
 
         if ($body === false) {
             throw new RuntimeException('Moodle API nicht erreichbar: ' . $error);
