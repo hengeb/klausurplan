@@ -135,6 +135,14 @@ $router->get('/stufenleitung/halbjahre/{id}/kurse', function (array $p): array {
     return StufenleitungApi::getKurse((int) $p['id']);
 }, 'admin', 'stufenleitung');
 
+$router->post('/stufenleitung/halbjahre/{id}/kurse', function (array $p): array {
+    return StufenleitungApi::addKurs((int) $p['id'], Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+$router->delete('/stufenleitung/kurse/{id}', function (array $p): array {
+    return StufenleitungApi::deleteKurs((int) $p['id']);
+}, 'admin', 'stufenleitung');
+
 // ------------------------------------------------------------------
 // Klausuren
 // ------------------------------------------------------------------

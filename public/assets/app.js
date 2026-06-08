@@ -561,20 +561,75 @@ async function viewHalbjahre(el) {
     // Kurse lazy laden
     el.querySelectorAll('.btn-kurs-laden').forEach(btn => {
         btn.addEventListener('click', async () => {
-            const hjId = btn.dataset.hjId;
+            const hjId = parseInt(btn.dataset.hjId);
             const ziel = el.querySelector(`#kurse-${hjId}`);
             btn.disabled = true;
             btn.textContent = 'Wird geladen…';
             try {
                 const kurse = await apiFetch(`/stufenleitung/halbjahre/${hjId}/kurse`);
-                ziel.innerHTML = renderKursTabelle(kurse);
+                ziel.innerHTML = renderKursTabelle(kurse) + renderKursAddFormHTML(hjId);
                 ziel.classList.remove('versteckt');
                 btn.remove();
-                ziel.querySelectorAll('.btn-kurs-teilnehmer').forEach(tnBtn => {
-                    tnBtn.addEventListener('click', () =>
-                        zeigeKursTeilnehmerDialog(parseInt(tnBtn.dataset.kursId), tnBtn.dataset.kursName)
-                    );
+
+                // Event delegation: Teilnehmende + Kurs löschen
+                ziel.addEventListener('click', async ev => {
+                    const tnBtn = ev.target.closest('.btn-kurs-teilnehmer');
+                    if (tnBtn) {
+                        zeigeKursTeilnehmerDialog(parseInt(tnBtn.dataset.kursId), tnBtn.dataset.kursName);
+                        return;
+                    }
+
+                    const loeschBtn = ev.target.closest('.btn-kurs-loeschen');
+                    if (loeschBtn) {
+                        const kursId   = parseInt(loeschBtn.dataset.kursId);
+                        const kursName = loeschBtn.dataset.kursName;
+                        if (!confirm(`Kurs „${kursName}" wirklich löschen?\n\nDabei werden alle Klausuren und Anwesenheitsdaten dieses Kurses unwiderruflich gelöscht.`)) return;
+                        loeschBtn.disabled = true;
+                        try {
+                            await apiFetch(`/stufenleitung/kurse/${kursId}`, { method: 'DELETE' });
+                            ziel.querySelector(`tr[data-kurs-id="${kursId}"]`)?.remove();
+                            const tbody = ziel.querySelector('tbody');
+                            if (tbody && tbody.querySelectorAll('tr[data-kurs-id]').length === 0) {
+                                const cols = hatRolle('admin', 'stufenleitung') ? 5 : 4;
+                                tbody.innerHTML = `<tr><td colspan="${cols}" class="hinweis" style="padding:.5rem">Noch keine Kurse.</td></tr>`;
+                            }
+                        } catch (err) {
+                            alert(`Fehler: ${err.message}`);
+                            loeschBtn.disabled = false;
+                        }
+                    }
                 });
+
+                // Kurs manuell hinzufügen
+                const form = ziel.querySelector('.kurs-add-form');
+                if (form) {
+                    form.addEventListener('submit', async ev => {
+                        ev.preventDefault();
+                        const bezeichnung = form.querySelector('[name="bezeichnung"]').value.trim();
+                        const kursart     = form.querySelector('[name="kursart"]').value;
+                        if (!bezeichnung) return;
+
+                        const submitBtn = form.querySelector('[type="submit"]');
+                        submitBtn.disabled = true;
+                        submitBtn.textContent = 'Wird gespeichert…';
+                        try {
+                            const neuerKurs = await apiFetch(`/stufenleitung/halbjahre/${hjId}/kurse`, {
+                                method: 'POST',
+                                body: JSON.stringify({ bezeichnung, kursart }),
+                            });
+                            const tbody = ziel.querySelector('tbody');
+                            tbody.querySelector('tr td[colspan]')?.closest('tr')?.remove();
+                            tbody.insertAdjacentHTML('beforeend', renderKursZeile(neuerKurs));
+                            form.reset();
+                            form.querySelector('[name="bezeichnung"]').focus();
+                        } catch (err) {
+                            alert(`Fehler: ${err.message}`);
+                        } finally {
+                            submitBtn.disabled = false;
+                            submitBtn.textContent = 'Hinzufügen';
+                        }
+                    });
+                }
             } catch (err) {
                 btn.disabled = false;
                 btn.textContent = 'Kurse anzeigen';
@@ -603,50 +658,65 @@ async function viewHalbjahre(el) {
     });
 }
 
+function renderKursAddFormHTML(hjId) {
+    if (!hatRolle('admin', 'stufenleitung')) return '';
+    return `
+    <form class="kurs-add-form" data-hj-id="${hjId}" style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <input type="text" name="bezeichnung" placeholder="Kursbezeichnung (z.B. SP_Q2_GK1_SZ)" required maxlength="50" style="flex:1;min-width:200px">
+        <select name="kursart">
+            <option value="GK">GK</option>
+            <option value="LK">LK</option>
+        </select>
+        <button type="submit" class="btn btn-klein">Hinzufügen</button>
+    </form>`;
+}
+
+function renderKursZeile(k) {
+    const lehrkraft = k.lehrer_id
+        ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}`
+        : k.lehrer_kuerzel
+        ? `<span class="fehlend">${escHtml(k.lehrer_kuerzel)} (nicht zugeordnet)</span>`
+        : '<span class="fehlend">–</span>';
+
+    const zugeordnetProzent = k.schueler_gesamt > 0
+        ? Math.round((k.schueler_zugeordnet / k.schueler_gesamt) * 100) : 0;
+    const ampel = k.schueler_gesamt === 0 ? 'grau'
+        : zugeordnetProzent === 100 ? 'gruen'
+        : zugeordnetProzent > 0 ? 'gelb' : 'rot';
+
+    const loeschTd = hatRolle('admin', 'stufenleitung')
+        ? `<td><button class="btn-icon btn-icon-gefahr btn-kurs-loeschen"
+                       data-kurs-id="${k.id}" data-kurs-name="${escHtml(k.anzeigename)}"
+                       title="Kurs löschen">🗑️</button></td>`
+        : '';
+
+    return `
+    <tr data-kurs-id="${k.id}">
+        <td>${escHtml(k.anzeigename)}</td>
+        <td>${escHtml(k.kursart)}</td>
+        <td>${lehrkraft}</td>
+        <td><button class="link-btn btn-kurs-teilnehmer"
+                    data-kurs-id="${k.id}" data-kurs-name="${escHtml(k.anzeigename)}"
+                    title="Teilnehmendenliste öffnen">
+            <span class="ampel ampel-${ampel}"></span>${k.schueler_zugeordnet}/${k.schueler_gesamt}
+        </button></td>
+        ${loeschTd}
+    </tr>`;
+}
+
 function renderKursTabelle(kurse) {
-    if (kurse.length === 0) return '<p class="hinweis">Keine Kurse in diesem Halbjahr.</p>';
-
-    const zeilen = kurse.map(k => {
-        const lehrkraft = k.lehrer_id
-            ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}`
-            : `<span class="fehlend">${escHtml(k.lehrer_kuerzel ?? '–')} (nicht zugeordnet)</span>`;
-
-        const zugeordnetProzent = k.schueler_gesamt > 0
-            ? Math.round((k.schueler_zugeordnet / k.schueler_gesamt) * 100)
-            : 0;
-
-        const ampel = k.schueler_gesamt === 0 ? 'grau'
-            : zugeordnetProzent === 100 ? 'gruen'
-            : zugeordnetProzent > 0 ? 'gelb'
-            : 'rot';
-
-        return `
-        <tr>
-            <td>${escHtml(k.anzeigename)}</td>
-            <td>${escHtml(k.kursart)}</td>
-            <td>${lehrkraft}</td>
-            <td>
-                <button class="link-btn btn-kurs-teilnehmer"
-                        data-kurs-id="${k.id}"
-                        data-kurs-name="${escHtml(k.anzeigename)}"
-                        title="Teilnehmendenliste öffnen">
-                    <span class="ampel ampel-${ampel}"></span>${k.schueler_zugeordnet}/${k.schueler_gesamt}
-                </button>
-            </td>
-        </tr>`;
-    }).join('');
+    const loeschTh = hatRolle('admin', 'stufenleitung') ? '<th></th>' : '';
+    const cols = hatRolle('admin', 'stufenleitung') ? 5 : 4;
+    const tbody = kurse.length > 0
+        ? kurse.map(renderKursZeile).join('')
+        : `<tr><td colspan="${cols}" class="hinweis" style="padding:.5rem">Noch keine Kurse.</td></tr>`;
 
     return `
         <table class="kurs-tabelle">
             <thead>
-                <tr>
-                    <th>Kurs</th>
-                    <th>Art</th>
-                    <th>Lehrkraft</th>
-                    <th>Schüler*innen</th>
-                </tr>
+                <tr><th>Kurs</th><th>Art</th><th>Lehrkraft</th><th>Schüler*innen</th>${loeschTh}</tr>
             </thead>
-            <tbody>${zeilen}</tbody>
+            <tbody>${tbody}</tbody>
         </table>`;
 }
 
@@ -701,15 +771,9 @@ async function zeigeKursTeilnehmerDialog(kursId, kursName) {
         }
 
         const zeilen = eintraege.map(e => {
-            let name;
-            if (e.nachname) {
-                name = `${escHtml(e.nachname)}, ${escHtml(e.vorname ?? '')}`;
-            } else if (e.name_roh.includes('|')) {
-                const [n, v] = e.name_roh.split('|');
-                name = `${escHtml(n)}, ${escHtml(v ?? '')}`;
-            } else {
-                name = escHtml(e.name_roh);
-            }
+            const name = e.nachname
+                ? `${escHtml(e.nachname)}, ${escHtml(e.vorname ?? '')}`
+                : parseZeigeNameRoh(e.name_roh);
 
             const kursart = e.kursart ? escHtml(e.kursart) : '<span class="fehlend">–</span>';
             const istZusatz = e.ist_zusatz == 1;
@@ -1359,7 +1423,7 @@ async function zeigeAnwesenheitDialog(klausur) {
     const zeilen = eintraege.map(e => {
         const name = e.nachname
             ? `${escHtml(e.nachname)}, ${escHtml(e.vorname ?? '')}`
-            : escHtml((e.name_roh ?? '').replace('|', ', '));
+            : parseZeigeNameRoh(e.name_roh);
 
         return `
         <tr class="aw-zeile" data-id="${e.kurs_schueler_id}" data-aid="${e.anwesenheit_id ?? ''}">
@@ -1675,7 +1739,7 @@ function renderNachschreibKlausurBlock(k) {
         const items = ns.map(s => {
             const name = s.nachname
                 ? `${escHtml(s.nachname)}, ${escHtml(s.vorname ?? '')}`
-                : escHtml((s.name_roh ?? '').replace('|', ', '));
+                : parseZeigeNameRoh(s.name_roh);
             return `<li>${name}${entschuldigungsBadge(s.entschuldigt)}</li>`;
         }).join('');
         nsHtml = `<ul class="nt-ns-liste">${items}</ul>`;
@@ -1770,7 +1834,7 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
     function schuelerAnzeigename(ns) {
         const name = ns.nachname
             ? `${escHtml(ns.nachname)}, ${escHtml(ns.vorname ?? '')}`
-            : escHtml((ns.name_roh ?? '').replace('|', ', '));
+            : parseZeigeNameRoh(ns.name_roh);
         return name + entschuldigungsBadge(ns.entschuldigt);
     }
 
@@ -1904,6 +1968,28 @@ function formatDatum(str) {
     if (!str) return '–';
     const [y, m, d] = str.split('-');
     return `${d}.${m}.${y}`;
+}
+
+/**
+ * Parst einen name_roh-Wert für die Anzeige und gibt "Nachname, Vorname" zurück.
+ * Formate: "Nachname|Vorname" (GoMST), "Nachname, Vorname" (manuelle Eingabe),
+ *          "Vorname Nachname" (ohne Komma → erstes Wort = Vorname).
+ */
+function parseZeigeNameRoh(nameRoh) {
+    const s = nameRoh ?? '';
+    if (s.includes('|')) {
+        const [n, v] = s.split('|');
+        return `${escHtml(n.trim())}, ${escHtml((v ?? '').trim())}`;
+    }
+    if (s.includes(',')) {
+        const i = s.indexOf(',');
+        return `${escHtml(s.substring(0, i).trim())}, ${escHtml(s.substring(i + 1).trim())}`;
+    }
+    const j = s.indexOf(' ');
+    if (j > 0) {
+        return `${escHtml(s.substring(j + 1).trim())}, ${escHtml(s.substring(0, j).trim())}`;
+    }
+    return escHtml(s);
 }
 
 function escHtml(str) {
@@ -2217,7 +2303,7 @@ async function zeigeNachschreibAnwesenheitDialog(termin) {
     const zeilen = eintraege.map(e => {
         const name = e.nachname
             ? `${escHtml(e.nachname)}, ${escHtml(e.vorname ?? '')}`
-            : escHtml((e.name_roh ?? '').replace('|', ', '));
+            : parseZeigeNameRoh(e.name_roh);
         const kursTag = e.kurs_anzeigename
             ? ` <span class="klausur-tag" style="font-size:.75rem">${escHtml(e.kurs_anzeigename)}</span>`
             : '';

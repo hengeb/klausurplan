@@ -59,6 +59,8 @@ class StufenleitungApi
         $db = Database::getInstance();
 
         // GoMST-Einträge ohne Moodle-Konto – eine Zeile pro Person (name_roh)
+        // Nur GoMST-Einträge (name_roh enthält '|'); manuell hinzugefügte Zusatzschüler
+        // haben kein Moodle-Konto und brauchen keine Zuordnung.
         $schuelerGomst = $db->query(
             "SELECT ks.name_roh,
                     COUNT(DISTINCT ks.id)                                         AS anzahl_kurse,
@@ -68,6 +70,7 @@ class StufenleitungApi
              JOIN halbjahre h ON h.id = k.halbjahr_id
              JOIN stufen s    ON s.id = h.stufe_id
              WHERE ks.schueler_id IS NULL
+               AND ks.name_roh LIKE '%|%'
              GROUP BY ks.name_roh
              ORDER BY ks.name_roh"
         )->fetchAll();
@@ -402,6 +405,98 @@ class StufenleitungApi
         $kurse->execute([$halbjahrId]);
 
         return $kurse->fetchAll();
+    }
+
+    // ------------------------------------------------------------------
+    // Manuelle Kursverwaltung
+    // ------------------------------------------------------------------
+
+    /**
+     * Legt einen Kurs manuell für ein Halbjahr an.
+     *
+     * Body: { bezeichnung: string, kursart: 'LK'|'GK', fach_kuerzel?: string }
+     * @return array{id: int, kurs_kuerzel: string, anzeigename: string, fach_kuerzel: string,
+     *               kursart: string, lehrer_kuerzel: null, lehrer_id: null,
+     *               lehrer_vorname: null, lehrer_nachname: null,
+     *               schueler_gesamt: int, schueler_zugeordnet: int}
+     */
+    public static function addKurs(int $halbjahrId, array $body): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $bezeichnung = trim($body['bezeichnung'] ?? '');
+        $kursart     = $body['kursart'] ?? 'GK';
+        $fachKuerzel = strtoupper(trim($body['fach_kuerzel'] ?? ''));
+
+        if ($bezeichnung === '') {
+            http_response_code(400);
+            throw new RuntimeException('Bezeichnung darf nicht leer sein.');
+        }
+        if (strlen($bezeichnung) > 50) {
+            http_response_code(400);
+            throw new RuntimeException('Bezeichnung zu lang (max. 50 Zeichen).');
+        }
+        if (!in_array($kursart, ['LK', 'GK'], true)) {
+            http_response_code(400);
+            throw new RuntimeException("Ungültige Kursart '$kursart'.");
+        }
+        if ($fachKuerzel === '') {
+            $fachKuerzel = strtoupper(preg_replace('/[\s_].*/', '', $bezeichnung));
+            $fachKuerzel = substr($fachKuerzel, 0, 10) ?: '–';
+        }
+
+        $stmt = $db->prepare('SELECT id FROM halbjahre WHERE id = ?');
+        $stmt->execute([$halbjahrId]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Halbjahr $halbjahrId nicht gefunden.");
+        }
+
+        $dup = $db->prepare('SELECT id FROM kurse WHERE halbjahr_id = ? AND kurs_kuerzel = ?');
+        $dup->execute([$halbjahrId, $bezeichnung]);
+        if ($dup->fetchColumn() !== false) {
+            http_response_code(409);
+            throw new RuntimeException('Ein Kurs mit dieser Bezeichnung existiert bereits in diesem Halbjahr.');
+        }
+
+        $db->prepare(
+            'INSERT INTO kurse (halbjahr_id, kurs_kuerzel, fach_kuerzel, kursart, anzeigename)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([$halbjahrId, $bezeichnung, $fachKuerzel, $kursart, $bezeichnung]);
+
+        return [
+            'id'                  => (int) $db->lastInsertId(),
+            'kurs_kuerzel'        => $bezeichnung,
+            'anzeigename'         => $bezeichnung,
+            'fach_kuerzel'        => $fachKuerzel,
+            'kursart'             => $kursart,
+            'lehrer_kuerzel'      => null,
+            'lehrer_id'           => null,
+            'lehrer_vorname'      => null,
+            'lehrer_nachname'     => null,
+            'schueler_gesamt'     => 0,
+            'schueler_zugeordnet' => 0,
+        ];
+    }
+
+    /**
+     * Löscht einen Kurs samt aller abhängigen Daten (CASCADE).
+     */
+    public static function deleteKurs(int $kursId): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('SELECT id FROM kurse WHERE id = ?');
+        $stmt->execute([$kursId]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Kurs $kursId nicht gefunden.");
+        }
+
+        $db->prepare('DELETE FROM kurse WHERE id = ?')->execute([$kursId]);
+        return ['ok' => true];
     }
 
     // ------------------------------------------------------------------
