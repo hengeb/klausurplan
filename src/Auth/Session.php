@@ -111,10 +111,4 @@ class Session
         $stmt->execute([$id]);
     }
 
-    public static function destroy(): void
-    {
-        session_unset();
-        session_destroy();
-        self::$started = false;
-    }
 }

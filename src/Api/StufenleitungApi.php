@@ -249,6 +249,60 @@ class StufenleitungApi
     }
 
     // ------------------------------------------------------------------
+    // Zusatzschüler*innen abrufen und löschen
+    // ------------------------------------------------------------------
+
+    /**
+     * Liefert alle manuell hinzugefügten Prüflinge (ohne '|' im name_roh).
+     * @return array<array{id: int, name_roh: string}>
+     */
+    public static function getZusatzSchueler(int $klausurId): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('SELECT kurs_id FROM klausuren WHERE id = ?');
+        $stmt->execute([$klausurId]);
+        $row = $stmt->fetch();
+        if ($row === false) {
+            http_response_code(404);
+            throw new RuntimeException("Klausur $klausurId nicht gefunden.");
+        }
+
+        $stmt = $db->prepare(
+            "SELECT id, name_roh FROM kurs_schueler
+             WHERE kurs_id = ? AND name_roh NOT LIKE '%|%'
+             ORDER BY name_roh"
+        );
+        $stmt->execute([(int) $row['kurs_id']]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Löscht einen manuell hinzugefügten Prüfling.
+     * Schlägt fehl wenn der Eintrag GoMST-Format hat oder nicht zur Klausur gehört.
+     */
+    public static function deleteZusatzSchueler(int $klausurId, int $ksId): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare(
+            "SELECT ks.id FROM kurs_schueler ks
+             JOIN klausuren kl ON kl.kurs_id = ks.kurs_id
+             WHERE kl.id = ? AND ks.id = ? AND ks.name_roh NOT LIKE '%|%'"
+        );
+        $stmt->execute([$klausurId, $ksId]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException('Zusatzschüler*in nicht gefunden oder gehört nicht zu dieser Klausur.');
+        }
+
+        $db->prepare('DELETE FROM kurs_schueler WHERE id = ?')->execute([$ksId]);
+        return ['ok' => true];
+    }
+
+    // ------------------------------------------------------------------
     // E-Mail manuell auslösen
     // ------------------------------------------------------------------
 

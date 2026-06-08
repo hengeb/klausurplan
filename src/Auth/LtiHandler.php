@@ -57,6 +57,13 @@ class LtiHandler extends Tool
             $rollen[] = 'admin';
         }
 
+        // Basis-Rolle automatisch setzen: Lehrkräfte erkennbar am Kürzel im Nachnamen
+        $basisRolle = ($kuerzel !== null) ? 'lehrkraft' : 'schueler';
+        if (!in_array($basisRolle, $rollen, true)) {
+            $this->weiseRolleZu($benutzer['id'], $basisRolle);
+            $rollen[] = $basisRolle;
+        }
+
         Session::start();
         Session::setBenutzer(
             $benutzer['id'],

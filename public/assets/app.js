@@ -49,10 +49,6 @@ const VIEWS = {
     schueler:            viewSchueler,
 };
 
-function navigate(hash) {
-    location.hash = hash;
-}
-
 window.addEventListener('hashchange', render);
 
 function render() {
@@ -525,8 +521,9 @@ async function viewHalbjahre(el) {
                                     </button>
                                     <button class="btn btn-klein btn-gefahr btn-hj-loeschen"
                                             data-hj-id="${hj.id}"
-                                            data-hj-label="${escHtml(hj.stufe + ' – ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}">
-                                        Löschen
+                                            data-hj-label="${escHtml(hj.stufe + ' – ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}"
+                                            title="Löschen">
+                                        🗑️
                                     </button>
                                 </div>
                             </div>
@@ -670,7 +667,7 @@ async function viewKlausuren(el) {
             const ziel = el.querySelector(`#tab-${btn.dataset.tab}`);
             ziel.classList.remove('versteckt');
 
-            if (btn.dataset.tab === 'uebersicht' && ziel.children.length === 0) {
+            if (btn.dataset.tab === 'uebersicht') {
                 ladeKlausurenUebersicht(ziel);
             } else if (btn.dataset.tab === 'neu' && ziel.children.length === 0) {
                 ladeKlausurNeuFormular(ziel, () => {
@@ -821,11 +818,11 @@ function renderKlausurZeile(k) {
 
     const aktionen = [];
     if (hatRolle('admin', 'stufenleitung')) {
-        aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-klausur-bearbeiten" data-id="${k.id}">Bearbeiten</button>`);
+        aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-klausur-bearbeiten" data-id="${k.id}" title="Bearbeiten">✏️</button>`);
         if (k.lehrer_id) {
             aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-email-ausloesen" data-id="${k.id}" title="Anwesenheits-E-Mail senden">E-Mail</button>`);
         }
-        aktionen.push(`<button class="btn btn-klein btn-gefahr btn-klausur-loeschen" data-id="${k.id}" data-name="${escHtml(k.kurs_anzeigename)}">Löschen</button>`);
+        aktionen.push(`<button class="btn btn-klein btn-gefahr btn-klausur-loeschen" data-id="${k.id}" data-name="${escHtml(k.kurs_anzeigename)}" title="Löschen">🗑️</button>`);
     }
     aktionen.push(`<button class="btn btn-klein btn-anwesenheit" data-id="${k.id}">Anwesenheit</button>`);
 
@@ -873,11 +870,13 @@ function zeigeKlausurBearbeitenDialog(k, nachSpeichern) {
             </div>
             <p id="dlg-fehler" class="fehler" style="display:none"></p>
             ${hatRolle('admin', 'stufenleitung') ? `
-            <details style="margin-top:1rem">
+            <details id="dlg-zusatz-details" style="margin-top:1rem">
                 <summary style="cursor:pointer;font-size:.875rem;color:#555">Zusätzliche Prüflinge (nicht in GoMST)</summary>
-                <div style="margin-top:.6rem;display:flex;gap:.5rem;align-items:center">
-                    <input type="text" id="dlg-zusatz-name" placeholder="Name, z.B. Mustermann, Max"
-                           style="flex:1;padding:.3rem .5rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
+                <div id="dlg-zusatz-liste" style="margin-top:.5rem;margin-bottom:.4rem"></div>
+                <div style="margin-top:.4rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                    <input type="text" id="dlg-zusatz-name"
+                           placeholder="Name – mehrere Zeilen mit Strg+V einfügen möglich"
+                           style="flex:1;min-width:180px;padding:.3rem .5rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
                     <button class="btn btn-klein btn-sekundaer" id="dlg-zusatz-btn">Hinzufügen</button>
                 </div>
                 <p id="dlg-zusatz-info" style="font-size:.8rem;margin:.4rem 0 0;color:#555"></p>
@@ -890,23 +889,109 @@ function zeigeKlausurBearbeitenDialog(k, nachSpeichern) {
     schliessbar(overlay);
 
     if (hatRolle('admin', 'stufenleitung')) {
+        const input  = overlay.querySelector('#dlg-zusatz-name');
+        const infoEl = overlay.querySelector('#dlg-zusatz-info');
+
+        async function ladezusatzListe() {
+            const listeEl = overlay.querySelector('#dlg-zusatz-liste');
+            try {
+                const eintraege = await apiFetch(`/stufenleitung/klausuren/${k.id}/zusatz-schueler`);
+                if (eintraege.length === 0) {
+                    listeEl.innerHTML = '<p style="font-size:.8rem;color:#888;margin:.2rem 0">Keine zusätzlichen Prüflinge.</p>';
+                } else {
+                    listeEl.innerHTML = eintraege.map(e =>
+                        `<div class="zusatz-zeile" data-ks-id="${e.id}"
+                              style="display:flex;align-items:center;gap:.4rem;margin-bottom:.25rem">
+                            <span style="font-size:.875rem">${escHtml(e.name_roh)}</span>
+                            <button class="btn btn-klein btn-gefahr btn-zusatz-loeschen" title="Löschen">🗑️</button>
+                        </div>`
+                    ).join('');
+
+                    listeEl.querySelectorAll('.btn-zusatz-loeschen').forEach(btn => {
+                        btn.addEventListener('click', async () => {
+                            const zeile = btn.closest('.zusatz-zeile');
+                            const name  = zeile.querySelector('span').textContent;
+                            const ksId  = zeile.dataset.ksId;
+                            if (!confirm(`„${name}" wirklich entfernen?`)) return;
+                            btn.disabled = true;
+                            try {
+                                await apiFetch(
+                                    `/stufenleitung/klausuren/${k.id}/zusatz-schueler/${ksId}`,
+                                    { method: 'DELETE' }
+                                );
+                                await ladezusatzListe();
+                            } catch (err) {
+                                alert(err.message);
+                                btn.disabled = false;
+                            }
+                        });
+                    });
+                }
+            } catch (err) {
+                overlay.querySelector('#dlg-zusatz-liste').innerHTML =
+                    `<p class="fehler" style="font-size:.8rem;margin:0">${escHtml(err.message)}</p>`;
+            }
+        }
+
+        async function addZusatz(name) {
+            await apiFetch(`/stufenleitung/klausuren/${k.id}/zusatz-schueler`, {
+                method: 'POST',
+                body: JSON.stringify({ name }),
+            });
+        }
+
+        // Liste laden wenn Details-Element geöffnet wird
+        overlay.querySelector('#dlg-zusatz-details').addEventListener('toggle', e => {
+            if (e.target.open) ladezusatzListe();
+        });
+
+        // Einzeln hinzufügen
         overlay.querySelector('#dlg-zusatz-btn').addEventListener('click', async () => {
-            const input  = overlay.querySelector('#dlg-zusatz-name');
-            const infoEl = overlay.querySelector('#dlg-zusatz-info');
-            const name   = input.value.trim();
+            const name = input.value.trim();
             if (!name) return;
             try {
-                await apiFetch(`/stufenleitung/klausuren/${k.id}/zusatz-schueler`, {
-                    method: 'POST',
-                    body: JSON.stringify({ name }),
-                });
+                await addZusatz(name);
                 infoEl.style.color = '#27ae60';
                 infoEl.textContent = `✓ „${name}" hinzugefügt.`;
                 input.value = '';
+                await ladezusatzListe();
             } catch (err) {
                 infoEl.style.color = '#c0392b';
                 infoEl.textContent = err.message;
             }
+        });
+
+        // Mehrere auf einmal per Paste mit Zeilenumbrüchen
+        input.addEventListener('paste', async e => {
+            const text = (e.clipboardData ?? window.clipboardData)?.getData('text') ?? '';
+            if (!text.includes('\n')) return; // Einzeilig → normales Paste-Verhalten
+            e.preventDefault();
+            const namen = text.split('\n').map(n => n.trim()).filter(n => n !== '');
+            if (namen.length === 0) return;
+
+            infoEl.style.color = '#555';
+            infoEl.textContent = `Füge ${namen.length} Einträge hinzu…`;
+            input.value = '';
+
+            let hinzugefuegt = 0;
+            const fehler = [];
+            for (const name of namen) {
+                try {
+                    await addZusatz(name);
+                    hinzugefuegt++;
+                } catch (err) {
+                    fehler.push(`„${name}": ${err.message}`);
+                }
+            }
+
+            if (fehler.length === 0) {
+                infoEl.style.color = '#27ae60';
+                infoEl.textContent = `✓ ${hinzugefuegt} Einträge hinzugefügt.`;
+            } else {
+                infoEl.style.color = '#c0392b';
+                infoEl.textContent = `${hinzugefuegt} hinzugefügt, ${fehler.length} Fehler: ${fehler[0]}`;
+            }
+            await ladezusatzListe();
         });
     }
 
@@ -1427,9 +1512,9 @@ function renderNachschreibtermineList(el, termine) {
                     ${hatRolle('admin', 'stufenleitung', 'lehrkraft') ? `
                     <button class="btn btn-klein btn-sekundaer btn-nt-anwesenheit" data-id="${t.id}">Anwesenheit</button>` : ''}
                     ${hatRolle('admin', 'stufenleitung') ? `
-                    <button class="btn btn-klein btn-sekundaer btn-nt-bearbeiten" data-id="${t.id}">Bearbeiten</button>
+                    <button class="btn btn-klein btn-sekundaer btn-nt-bearbeiten" data-id="${t.id}" title="Bearbeiten">✏️</button>
                     <button class="btn btn-klein btn-sekundaer btn-nt-klausuren" data-id="${t.id}">Klausuren verknüpfen</button>
-                    <button class="btn btn-klein btn-gefahr btn-nt-loeschen" data-id="${t.id}">Löschen</button>` : ''}
+                    <button class="btn btn-klein btn-gefahr btn-nt-loeschen" data-id="${t.id}" title="Löschen">🗑️</button>` : ''}
                 </div>
             </div>
             ${t.bemerkung ? `<p class="nt-bemerkung">${escHtml(t.bemerkung)}</p>` : ''}
@@ -1813,6 +1898,7 @@ async function viewAdmin(el) {
                     Synchronisation abgeschlossen:
                     <strong>${res.neu}</strong> neue Nutzer*innen,
                     <strong>${res.aktualisiert}</strong> aktualisiert,
+                    <strong>${res.geloescht}</strong> gelöscht,
                     <strong>${res.gesamt}</strong> gesamt verarbeitet.
                 </div>`;
         } catch (err) {
@@ -1852,7 +1938,7 @@ async function ladeFaecherAbschnitt(el) {
             <td>
                 <button class="btn btn-klein btn-fach-speichern">Speichern</button>
                 <span class="fach-ok" style="display:none;color:#27ae60;font-size:.8rem;margin-left:.4rem">✓</span>
-                <button class="btn btn-klein btn-gefahr btn-fach-loeschen" style="margin-left:.25rem">Löschen</button>
+                <button class="btn btn-klein btn-gefahr btn-fach-loeschen" style="margin-left:.25rem" title="Löschen">🗑️</button>
             </td>
         </tr>`).join('');
 
@@ -2175,7 +2261,7 @@ async function ladeBenutzerAbschnitt(el) {
             <td class="td-rollen">${badges}</td>
             <td>
                 <button class="btn btn-klein btn-sekundaer btn-rollen-bearbeiten"
-                        data-id="${b.id}">Bearbeiten</button>
+                        data-id="${b.id}" title="Rollen bearbeiten">✏️</button>
             </td>
         </tr>`;
     }).join('');

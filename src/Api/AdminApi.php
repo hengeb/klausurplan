@@ -23,6 +23,11 @@ class AdminApi
                     GROUP_CONCAT(r.rolle ORDER BY r.rolle SEPARATOR \',\') AS rollen_csv
              FROM benutzer b
              LEFT JOIN rollen r ON r.benutzer_id = b.id
+             WHERE EXISTS (
+                 SELECT 1 FROM rollen r2
+                 WHERE r2.benutzer_id = b.id
+                   AND r2.rolle IN (\'admin\', \'stufenleitung\', \'lehrkraft\')
+             )
              GROUP BY b.id
              ORDER BY b.nachname, b.vorname'
         );

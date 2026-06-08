@@ -26,13 +26,15 @@ class MoodleApi
      * Holt alle aktiven Nutzer*innen aus Moodle (ldap + manual Auth)
      * und aktualisiert die lokale benutzer-Tabelle.
      *
-     * @return array{neu: int, aktualisiert: int, gesamt: int}
+     * @return array{neu: int, aktualisiert: int, geloescht: int, gesamt: int}
      */
     public function sync(): array
     {
         $moodleNutzer = $this->alleNutzer();
         $db  = Database::getInstance();
         $neu = $aktualisiert = 0;
+
+        $geseheneMoodleIds = [];
 
         foreach ($moodleNutzer as $mn) {
             $moodleId     = (string) $mn['id'];
@@ -54,8 +56,10 @@ class MoodleApi
                 continue;
             }
 
+            $geseheneMoodleIds[] = $moodleId;
+
             $stmt = $db->prepare(
-                'SELECT vorname, nachname, email, kuerzel, stufe FROM benutzer WHERE moodle_id = ?'
+                'SELECT id, vorname, nachname, email, kuerzel, stufe FROM benutzer WHERE moodle_id = ?'
             );
             $stmt->execute([$moodleId]);
             $vorhandener = $stmt->fetch();
@@ -65,9 +69,16 @@ class MoodleApi
                     'INSERT INTO benutzer (moodle_id, vorname, nachname, email, kuerzel, stufe)
                      VALUES (?, ?, ?, ?, ?, ?)'
                 )->execute([$moodleId, $vorname, $nachname, $email, $kuerzel, $stufe]);
+                $benutzerId = (int) $db->lastInsertId();
                 $neu++;
+
+                // Basis-Rolle automatisch setzen
+                $basisRolle = $istLehrkraft ? 'lehrkraft' : 'schueler';
+                $db->prepare('INSERT IGNORE INTO rollen (benutzer_id, rolle) VALUES (?, ?)')
+                   ->execute([$benutzerId, $basisRolle]);
             } else {
-                $geandert = $vorhandener['vorname'] !== $vorname
+                $benutzerId = (int) $vorhandener['id'];
+                $geandert   = $vorhandener['vorname'] !== $vorname
                     || $vorhandener['nachname'] !== $nachname
                     || $vorhandener['email'] !== $email
                     || ($kuerzel !== null && $vorhandener['kuerzel'] !== $kuerzel)
@@ -85,12 +96,43 @@ class MoodleApi
                     )->execute([$vorname, $nachname, $email, $kuerzel, $kuerzel, $stufe, $moodleId]);
                     $aktualisiert++;
                 }
+
+                // Basis-Rolle setzen falls noch nicht vorhanden
+                $basisRolle = $istLehrkraft ? 'lehrkraft' : 'schueler';
+                $db->prepare('INSERT IGNORE INTO rollen (benutzer_id, rolle) VALUES (?, ?)')
+                   ->execute([$benutzerId, $basisRolle]);
             }
         }
 
         $this->bereinigeDoppelteKuerzel($db);
 
-        return ['neu' => $neu, 'aktualisiert' => $aktualisiert, 'gesamt' => count($moodleNutzer)];
+        // Nicht mehr in Moodle vorhandene und nicht referenzierte Nutzer*innen löschen
+        $geloescht = $this->loescheVeraltet($db, $geseheneMoodleIds);
+
+        return ['neu' => $neu, 'aktualisiert' => $aktualisiert, 'geloescht' => $geloescht, 'gesamt' => count($moodleNutzer)];
+    }
+
+    /**
+     * Löscht lokale Benutzer*innen, die nicht mehr in Moodle vorhanden sind
+     * und an keiner Klausur mehr beteiligt sind (kurs_schueler.schueler_id, kurse.lehrer_id).
+     */
+    private function loescheVeraltet(\PDO $db, array $geseheneMoodleIds): int
+    {
+        if (empty($geseheneMoodleIds)) {
+            return 0;
+        }
+
+        $platzhalter = implode(',', array_fill(0, count($geseheneMoodleIds), '?'));
+
+        $stmt = $db->prepare(
+            "DELETE FROM benutzer
+             WHERE moodle_id NOT IN ($platzhalter)
+               AND id NOT IN (SELECT schueler_id FROM kurs_schueler WHERE schueler_id IS NOT NULL)
+               AND id NOT IN (SELECT lehrer_id   FROM kurse           WHERE lehrer_id   IS NOT NULL)"
+        );
+        $stmt->execute($geseheneMoodleIds);
+
+        return $stmt->rowCount();
     }
 
     /**

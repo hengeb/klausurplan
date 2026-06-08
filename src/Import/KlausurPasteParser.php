@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Klausurplan\Import;
 
-use RuntimeException;
-
 /**
  * Validiert und normalisiert tab-getrennte Klausurdaten,
  * die der Browser aus einem Excel-Paste gewonnen hat.
@@ -15,10 +13,6 @@ use RuntimeException;
  */
 class KlausurPasteParser
 {
-    /** Erlaubte Spaltenüberschriften (case-insensitive) */
-    private const PFLICHTFELDER = ['kurs'];
-    private const ALLE_FELDER   = ['kurs', 'datum', 'uhrzeit', 'dauer', 'raum'];
-
     /**
      * Parsed und validiert rohe Paste-Zeilen.
      *

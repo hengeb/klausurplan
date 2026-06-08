@@ -76,7 +76,7 @@ class LehrkraftApi
              JOIN stufen s    ON s.id    = h.stufe_id
              LEFT JOIN benutzer lb ON lb.id = kurs.lehrer_id
              $bedingung
-             ORDER BY k.termin_datum IS NULL, k.termin_datum, k.termin_uhrzeit, kurs.anzeigename"
+             ORDER BY k.termin_datum IS NULL, k.termin_datum, kurs.anzeigename, k.klausur_nr"
         );
         $stmt->execute($params);
         $klausuren = $stmt->fetchAll();

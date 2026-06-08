@@ -217,8 +217,16 @@ $router->post('/anwesenheit/{klausur_id}', function (array $p): array {
 // ------------------------------------------------------------------
 // Stufenleitung – Zusätzliche Prüflinge (Gastschüler*innen)
 // ------------------------------------------------------------------
+$router->get('/stufenleitung/klausuren/{klausur_id}/zusatz-schueler', function (array $p): array {
+    return StufenleitungApi::getZusatzSchueler((int) $p['klausur_id']);
+}, 'admin', 'stufenleitung');
+
 $router->post('/stufenleitung/klausuren/{klausur_id}/zusatz-schueler', function (array $p): array {
     return StufenleitungApi::addZusatzSchueler((int) $p['klausur_id'], Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+$router->delete('/stufenleitung/klausuren/{klausur_id}/zusatz-schueler/{ks_id}', function (array $p): array {
+    return StufenleitungApi::deleteZusatzSchueler((int) $p['klausur_id'], (int) $p['ks_id']);
 }, 'admin', 'stufenleitung');
 
 // ------------------------------------------------------------------
