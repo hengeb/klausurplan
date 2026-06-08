@@ -210,13 +210,38 @@ async function viewZuordnungen(el) {
     renderZuordnungenView(el, daten);
 }
 
+/**
+ * Prüft ob ein Moodle-Nutzer zur Stufe eines GoMST-Eintrags passt.
+ * - Kein Moodle-Stufe → immer anzeigen (unbekannt = nicht ausschließen)
+ * - GoMST-Stufe beginnt mit Zahl (z.B. "9a", "10b") → Moodle-Stufe muss mit
+ *   derselben führenden Zahl beginnen (z.B. "9b", "10c" passen auch)
+ * - Sonst (z.B. "Q2", "EF") → exakter Vergleich
+ */
+function matchesStufe(moodleStufe, gomstStufen) {
+    if (!moodleStufe) return true;
+    const stufen = (gomstStufen ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    if (stufen.length === 0) return true;
+    for (const stufe of stufen) {
+        const numPräfix = stufe.match(/^(\d+)/);
+        if (numPräfix) {
+            if (moodleStufe.startsWith(numPräfix[1])) return true;
+        } else {
+            if (moodleStufe === stufe) return true;
+        }
+    }
+    return false;
+}
+
 function renderZuordnungenView(el, daten) {
     const {
         schueler_gomst: sGomst,
         schueler_moodle: sMoodle,
-        lehrkraefte_kurse: lKurse,
+        lehrkraefte_kurse: lKurseRaw,
         lehrkraefte_moodle: lMoodle,
     } = daten;
+
+    // Kürzels, die mit einer Ziffer enden, sind keine echten Lehrkraft-Kürzels
+    const lKurse = lKurseRaw.filter(k => !/\d$/.test(k.lehrer_kuerzel));
 
     const anzUnzugeordnetS = sGomst.length;
     const anzUnzugeordnetL = lKurse.filter(k => !lMoodle.some(l => l.kuerzel === k.lehrer_kuerzel)).length;
@@ -313,14 +338,16 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
         return '<div class="karte"><p class="ok-text">✓ Alle Schüler*innen sind zugeordnet.</p></div>';
     }
 
-    // Moodle-Nutzer*innen als Optionsliste
-    const moodleOptionen = sMoodle.map(m =>
-        `<option value="${m.id}">${m.nachname}, ${m.vorname}${m.stufe ? ` (${m.stufe})` : ''}</option>`
-    ).join('');
-
     const zeilen = sGomst.map(ks => {
         const [nachname, vorname] = ks.name_roh.split('|');
         const nameRohAttr = escHtml(ks.name_roh);
+
+        // Nur Moodle-Konten mit passender Stufe anzeigen
+        const passende = sMoodle.filter(m => matchesStufe(m.stufe, ks.stufen));
+        const moodleOptionen = passende.map(m =>
+            `<option value="${m.id}">${m.nachname}, ${m.vorname}${m.stufe ? ` (${m.stufe})` : ''}</option>`
+        ).join('');
+
         return `
         <tr>
             <td>${escHtml(nachname)}, ${escHtml(vorname ?? '')}</td>
