@@ -30,7 +30,7 @@ class Mailer
             $mail->SMTPAuth   = true;
             $mail->Username   = $_ENV['SMTP_USER'] ?? '';
             $mail->Password   = $_ENV['SMTP_PASS'] ?? '';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->SMTPSecure = $_ENV['SMTP_ENCRYPTION'] ?? PHPMailer::ENCRYPTION_STARTTLS; // 'ssl' für Port 465, 'tls' für Port 587
             $mail->CharSet    = PHPMailer::CHARSET_UTF8;
 
             $fromEmail = $_ENV['SMTP_USER'] ?? '';
