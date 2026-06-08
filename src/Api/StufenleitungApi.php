@@ -295,4 +295,30 @@ class StufenleitungApi
 
         return $kurse->fetchAll();
     }
+
+    // ------------------------------------------------------------------
+    // Daten löschen
+    // ------------------------------------------------------------------
+
+    /**
+     * Löscht ein Halbjahr samt aller abhängigen Daten (CASCADE).
+     *
+     * @return array{ok: bool}
+     */
+    public static function deleteHalbjahr(int $halbjahrId): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('SELECT id FROM halbjahre WHERE id = ?');
+        $stmt->execute([$halbjahrId]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Halbjahr {$halbjahrId} nicht gefunden.");
+        }
+
+        $db->prepare('DELETE FROM halbjahre WHERE id = ?')->execute([$halbjahrId]);
+
+        return ['ok' => true];
+    }
 }

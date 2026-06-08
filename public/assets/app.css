@@ -137,6 +137,12 @@ main {
 }
 .btn-sekundaer:hover:not(:disabled) { background: #d4dce6; }
 
+.btn-gefahr {
+    background: #c0392b;
+    color: #fff;
+}
+.btn-gefahr:hover:not(:disabled) { background: #a93226; }
+
 .btn-klein {
     padding: 0.3rem 0.7rem;
     font-size: 0.8125rem;
@@ -211,7 +217,8 @@ main {
 }
 
 .zuordnungs-tabelle,
-.kurs-tabelle {
+.kurs-tabelle,
+.data-tabelle {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.875rem;
@@ -220,20 +227,35 @@ main {
 .zuordnungs-tabelle th,
 .zuordnungs-tabelle td,
 .kurs-tabelle th,
-.kurs-tabelle td {
+.kurs-tabelle td,
+.data-tabelle th,
+.data-tabelle td {
     padding: 0.5rem 0.75rem;
     text-align: left;
     border-bottom: 1px solid #e8edf2;
 }
 
 .zuordnungs-tabelle th,
-.kurs-tabelle th {
+.kurs-tabelle th,
+.data-tabelle th {
     background: #f5f7fa;
     font-weight: 600;
     color: #333;
     font-size: 0.8125rem;
     text-transform: uppercase;
     letter-spacing: .03em;
+}
+
+.data-tabelle tbody tr:last-child td { border-bottom: none; }
+
+.data-tabelle tbody tr.fehlend td { color: #888; font-style: italic; }
+
+.fach-kuerzel-zelle {
+    font-family: monospace;
+    font-weight: 600;
+    color: #1a3a5c;
+    white-space: nowrap;
+    width: 5rem;
 }
 
 .zuordnungs-tabelle tr:hover td { background: #fafbfc; }
@@ -307,8 +329,16 @@ main {
 
 .hj-block:last-child { border-bottom: none; margin-bottom: 0; }
 
+.hj-kopf {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+}
+
 .hj-block h4 {
-    margin: 0 0 0.6rem;
+    margin: 0;
     font-size: 0.9rem;
     color: #333;
     display: flex;

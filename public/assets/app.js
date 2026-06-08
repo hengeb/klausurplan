@@ -34,6 +34,7 @@ const VIEWS = {
     klausuren:           viewKlausuren,
     nachschreibtermine:  viewNachschreibtermine,
     admin:               viewAdmin,
+    schueler:            viewSchueler,
 };
 
 function navigate(hash) {
@@ -61,6 +62,10 @@ function renderNav() {
     const links = [
         { hash: 'start', label: 'Übersicht' },
     ];
+
+    if (hatRolle('schueler') && !hatRolle('admin', 'stufenleitung', 'lehrkraft')) {
+        links.push({ hash: 'schueler', label: 'Meine Klausuren' });
+    }
 
     if (hatRolle('admin', 'stufenleitung', 'lehrkraft')) {
         links.push({ hash: 'klausuren', label: 'Klausuren' });
@@ -97,6 +102,11 @@ async function viewStart(el) {
             <p>Rollen: <strong>${me.rollen.length ? me.rollen.join(', ') : '–'}</strong></p>
         </div>
         <div class="kacheln">
+            ${hatRolle('schueler') && !hatRolle('admin', 'stufenleitung', 'lehrkraft') ? `
+            <a href="#schueler" class="kachel">
+                <span class="kachel-icon">📅</span>
+                <span>Meine Klausuren</span>
+            </a>` : ''}
             ${hatRolle('admin', 'stufenleitung', 'lehrkraft') ? `
             <a href="#klausuren" class="kachel">
                 <span class="kachel-icon">📝</span>
@@ -492,13 +502,22 @@ async function viewHalbjahre(el) {
                 </button>
                 <div class="accordion-body">
                     ${hjs.map(hj => `
-                        <div class="hj-block">
-                            <h4>${escHtml(hj.stufe)} – ${hj.abschnitt}. Halbjahr
-                                <span class="hj-meta">${hj.kurs_anzahl} Kurs(e)</span>
-                            </h4>
-                            <button class="btn btn-klein btn-kurs-laden" data-hj-id="${hj.id}">
-                                Kurse anzeigen
-                            </button>
+                        <div class="hj-block" data-hj-id="${hj.id}">
+                            <div class="hj-kopf">
+                                <h4 style="margin:0">${escHtml(hj.stufe)} – ${hj.abschnitt}. Halbjahr
+                                    <span class="hj-meta">${hj.kurs_anzahl} Kurs(e)</span>
+                                </h4>
+                                <div style="display:flex;gap:.5rem;align-items:center">
+                                    <button class="btn btn-klein btn-kurs-laden" data-hj-id="${hj.id}">
+                                        Kurse anzeigen
+                                    </button>
+                                    <button class="btn btn-klein btn-gefahr btn-hj-loeschen"
+                                            data-hj-id="${hj.id}"
+                                            data-hj-label="${escHtml(hj.stufe + ' – ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}">
+                                        Löschen
+                                    </button>
+                                </div>
+                            </div>
                             <div id="kurse-${hj.id}" class="kurs-liste versteckt"></div>
                         </div>
                     `).join('')}
@@ -539,6 +558,24 @@ async function viewHalbjahre(el) {
                 btn.textContent = 'Kurse anzeigen';
                 ziel.innerHTML = `<p class="fehler">${err.message}</p>`;
                 ziel.classList.remove('versteckt');
+            }
+        });
+    });
+
+    // Halbjahr löschen
+    el.querySelectorAll('.btn-hj-loeschen').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const hjId    = btn.dataset.hjId;
+            const label   = btn.dataset.hjLabel;
+            if (!confirm(`Halbjahr „${label}" wirklich löschen?\n\nDabei werden alle Kurse, Klausuren und Anwesenheitsdaten dieses Halbjahrs unwiderruflich gelöscht.`)) return;
+
+            btn.disabled = true;
+            try {
+                await apiFetch(`/stufenleitung/daten/${hjId}`, { method: 'DELETE' });
+                btn.closest('.hj-block').remove();
+            } catch (err) {
+                alert(`Fehler: ${err.message}`);
+                btn.disabled = false;
             }
         });
     });
@@ -1655,6 +1692,11 @@ async function viewAdmin(el) {
             <button id="sync-btn" class="btn">Jetzt synchronisieren</button>
             <div id="sync-ergebnis" style="margin-top: 1rem;"></div>
         </div>
+        <div class="karte">
+            <h3>Fächerbezeichnungen</h3>
+            <p>Zuordnung von Fachkürzeln (wie in GoMST) zu lesbaren Bezeichnungen.</p>
+            <div id="faecher-container"></div>
+        </div>
     `;
 
     el.querySelector('#sync-btn').addEventListener('click', async () => {
@@ -1680,6 +1722,135 @@ async function viewAdmin(el) {
             btn.textContent = 'Jetzt synchronisieren';
         }
     });
+
+    // Fächerliste laden und rendern
+    await ladeFaecherAbschnitt(el);
+}
+
+async function ladeFaecherAbschnitt(el) {
+    const container = el.querySelector('#faecher-container');
+    container.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+
+    let faecher;
+    try {
+        faecher = await apiFetch('/admin/faecher');
+    } catch (err) {
+        container.innerHTML = `<p class="fehler">${escHtml(err.message)}</p>`;
+        return;
+    }
+
+    const zeilen = faecher.map(f => `
+        <tr data-kuerzel="${escHtml(f.kuerzel)}">
+            <td class="fach-kuerzel-zelle">${escHtml(f.kuerzel)}</td>
+            <td>
+                <input type="text" class="fach-bezeichnung-input" value="${escHtml(f.bezeichnung)}"
+                       style="width:100%;max-width:260px;padding:.25rem .4rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
+            </td>
+            <td>
+                <button class="btn btn-klein btn-fach-speichern">Speichern</button>
+                <span class="fach-ok" style="display:none;color:#27ae60;font-size:.8rem;margin-left:.4rem">✓</span>
+            </td>
+        </tr>`).join('');
+
+    container.innerHTML = `
+        <div class="tabelle-wrapper">
+            <table class="data-tabelle">
+                <thead><tr><th>Kürzel</th><th>Bezeichnung</th><th></th></tr></thead>
+                <tbody>${zeilen}</tbody>
+            </table>
+        </div>`;
+
+    container.querySelectorAll('.btn-fach-speichern').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const tr          = btn.closest('tr');
+            const kuerzel     = tr.dataset.kuerzel;
+            const bezeichnung = tr.querySelector('.fach-bezeichnung-input').value.trim();
+            const okEl        = tr.querySelector('.fach-ok');
+            if (!bezeichnung) return;
+
+            btn.disabled = true;
+            try {
+                await apiFetch(`/admin/faecher/${encodeURIComponent(kuerzel)}`, {
+                    method: 'PUT',
+                    body:   JSON.stringify({ bezeichnung }),
+                });
+                okEl.style.display = '';
+                setTimeout(() => { okEl.style.display = 'none'; }, 2000);
+            } catch (err) {
+                alert(`Fehler: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// View: Schüler*innen
+// ---------------------------------------------------------------------------
+
+async function viewSchueler(el) {
+    if (!hatRolle('schueler')) {
+        el.innerHTML = '<p class="fehler">Kein Zugriff.</p>';
+        return;
+    }
+
+    el.innerHTML = '<p class="lade-text">Klausurtermine werden geladen…</p>';
+
+    let klausuren;
+    try {
+        klausuren = await apiFetch('/schueler/meine-klausuren');
+    } catch (err) {
+        el.innerHTML = `<p class="fehler">Fehler: ${escHtml(err.message)}</p>`;
+        return;
+    }
+
+    if (klausuren.length === 0) {
+        el.innerHTML = `
+            <h2>Meine Klausuren</h2>
+            <div class="karte">
+                <p>Es wurden noch keine Klausurtermine für Sie eingetragen.</p>
+            </div>`;
+        return;
+    }
+
+    const zeilen = klausuren.map(k => {
+        const datum   = k.termin_datum   ? formatDatum(k.termin_datum)      : '<span class="fehlend">–</span>';
+        const uhrzeit = k.termin_uhrzeit ? k.termin_uhrzeit.substring(0, 5) : '–';
+        const dauer   = k.dauer_minuten  ? `${k.dauer_minuten} min`         : '–';
+        const raum    = k.raum           ? escHtml(k.raum)                  : '–';
+        const nr      = k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : '';
+
+        const datumKlasse = !k.termin_datum ? ' class="fehlend"' : '';
+
+        return `
+        <tr${datumKlasse}>
+            <td>${escHtml(k.kurs_anzeigename)}${nr}</td>
+            <td>${datum}</td>
+            <td>${uhrzeit}</td>
+            <td>${dauer}</td>
+            <td>${raum}</td>
+        </tr>`;
+    }).join('');
+
+    el.innerHTML = `
+        <h2>Meine Klausuren</h2>
+        <div class="karte" style="padding:0;overflow:hidden">
+            <div class="tabelle-wrapper">
+                <table class="data-tabelle">
+                    <thead>
+                        <tr>
+                            <th>Kurs</th>
+                            <th>Datum</th>
+                            <th>Uhrzeit</th>
+                            <th>Dauer</th>
+                            <th>Raum</th>
+                        </tr>
+                    </thead>
+                    <tbody>${zeilen}</tbody>
+                </table>
+            </div>
+        </div>`;
 }
 
 // ---------------------------------------------------------------------------

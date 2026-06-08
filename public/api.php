@@ -9,6 +9,7 @@ use Klausurplan\Api\AdminApi;
 use Klausurplan\Api\StufenleitungApi;
 use Klausurplan\Api\LehrkraftApi;
 use Klausurplan\Api\AnwesenheitApi;
+use Klausurplan\Api\SchuelerApi;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -185,6 +186,20 @@ $router->post('/stufenleitung/entschuldigung/{anwesenheit_id}', function (array 
 $router->post('/stufenleitung/email-ausloesen/{klausur_id}', function (array $p): array {
     return StufenleitungApi::emailAusloesen((int) $p['klausur_id']);
 }, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Stufenleitung – Daten löschen
+// ------------------------------------------------------------------
+$router->delete('/stufenleitung/daten/{halbjahr_id}', function (array $p): array {
+    return StufenleitungApi::deleteHalbjahr((int) $p['halbjahr_id']);
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Schüler*innen
+// ------------------------------------------------------------------
+$router->get('/schueler/meine-klausuren', function (): array {
+    return SchuelerApi::meineKlausuren();
+}, 'schueler');
 
 // ------------------------------------------------------------------
 
