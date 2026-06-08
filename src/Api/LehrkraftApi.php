@@ -355,7 +355,7 @@ class LehrkraftApi
     // Nachschreibtermine
     // ------------------------------------------------------------------
 
-    /** Alle Nachschreibtermine inkl. verknüpfter Klausuren. */
+    /** Alle Nachschreibtermine inkl. verknüpfter Klausuren und deren Nachschreiber*innen. */
     public static function getNachschreibtermine(): array
     {
         Session::requireRolle('admin', 'stufenleitung', 'lehrkraft');
@@ -367,18 +367,64 @@ class LehrkraftApi
              ORDER BY n.termin_datum IS NULL, n.termin_datum, n.termin_uhrzeit'
         )->fetchAll();
 
-        // Verknüpfte Klausuren nachladen
+        if (empty($termine)) {
+            return $termine;
+        }
+
+        // Verknüpfte Klausuren + Nachschreiber*innen in einer einzigen Abfrage
+        $alleZuordnungen = $db->query(
+            'SELECT nz.nachschreibtermin_id,
+                    k.id              AS klausur_id,
+                    k.klausur_nr,
+                    kurs.anzeigename  AS kurs_anzeigename,
+                    ks.id             AS kurs_schueler_id,
+                    ks.name_roh,
+                    b.id              AS benutzer_id,
+                    b.vorname,
+                    b.nachname,
+                    a.entschuldigt
+             FROM nachschreib_zuordnungen nz
+             JOIN klausuren k   ON k.id   = nz.klausur_id
+             JOIN kurse kurs    ON kurs.id = k.kurs_id
+             LEFT JOIN anwesenheiten a
+                    ON a.klausur_id = k.id AND a.status = \'fehlend\'
+             LEFT JOIN kurs_schueler ks ON ks.id = a.kurs_schueler_id
+             LEFT JOIN benutzer b       ON b.id  = ks.schueler_id
+             ORDER BY nz.nachschreibtermin_id,
+                      kurs.anzeigename,
+                      COALESCE(b.nachname, ks.name_roh),
+                      b.vorname'
+        )->fetchAll();
+
+        // Reshape: terminId → { klausurId → { ...info, nachschreiber[] } }
+        $klausurenMap = [];
+        foreach ($alleZuordnungen as $row) {
+            $tid = (int) $row['nachschreibtermin_id'];
+            $kid = (int) $row['klausur_id'];
+
+            if (!isset($klausurenMap[$tid][$kid])) {
+                $klausurenMap[$tid][$kid] = [
+                    'id'               => $kid,
+                    'klausur_nr'       => (int) $row['klausur_nr'],
+                    'kurs_anzeigename' => $row['kurs_anzeigename'],
+                    'nachschreiber'    => [],
+                ];
+            }
+
+            if ($row['kurs_schueler_id'] !== null) {
+                $klausurenMap[$tid][$kid]['nachschreiber'][] = [
+                    'kurs_schueler_id' => $row['kurs_schueler_id'],
+                    'name_roh'         => $row['name_roh'],
+                    'benutzer_id'      => $row['benutzer_id'],
+                    'vorname'          => $row['vorname'],
+                    'nachname'         => $row['nachname'],
+                    'entschuldigt'     => $row['entschuldigt'],
+                ];
+            }
+        }
+
         foreach ($termine as &$t) {
-            $stmt = $db->prepare(
-                'SELECT k.id, k.klausur_nr, kurs.anzeigename AS kurs_anzeigename
-                 FROM nachschreib_zuordnungen nz
-                 JOIN klausuren k   ON k.id   = nz.klausur_id
-                 JOIN kurse kurs    ON kurs.id = k.kurs_id
-                 WHERE nz.nachschreibtermin_id = ?
-                 ORDER BY kurs.anzeigename'
-            );
-            $stmt->execute([$t['id']]);
-            $t['klausuren'] = $stmt->fetchAll();
+            $t['klausuren'] = array_values($klausurenMap[(int) $t['id']] ?? []);
         }
         unset($t);
 

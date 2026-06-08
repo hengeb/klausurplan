@@ -1264,7 +1264,7 @@ function renderNachschreibtermineList(el, termine) {
         const uhrzeit = t.termin_uhrzeit ? t.termin_uhrzeit.substring(0, 5)   : '–';
 
         const klausurenHtml = t.klausuren.length > 0
-            ? t.klausuren.map(k => `<span class="klausur-tag">${escHtml(k.kurs_anzeigename)}</span>`).join(' ')
+            ? t.klausuren.map(k => renderNachschreibKlausurBlock(k)).join('')
             : '<span class="hinweis">Keine Klausuren verknüpft</span>';
 
         return `
@@ -1324,6 +1324,24 @@ function renderNachschreibtermineList(el, termine) {
             }
         });
     });
+}
+
+function renderNachschreibKlausurBlock(k) {
+    const ns = k.nachschreiber ?? [];
+    let nsHtml = '';
+    if (ns.length > 0) {
+        const items = ns.map(s => {
+            const name = s.nachname
+                ? `${escHtml(s.nachname)}, ${escHtml(s.vorname ?? '')}`
+                : escHtml((s.name_roh ?? '').replace('|', ', '));
+            const entsch = s.entschuldigt == 1
+                ? ' <span class="vk-entsch">entsch.</span>'
+                : '';
+            return `<li>${name}${entsch}</li>`;
+        }).join('');
+        nsHtml = `<ul class="nt-ns-liste">${items}</ul>`;
+    }
+    return `<div class="nt-klausur-block"><span class="klausur-tag">${escHtml(k.kurs_anzeigename)}</span>${nsHtml}</div>`;
 }
 
 function renderNachschreibterminFormular(el, vorhandener, nachSpeichern) {
