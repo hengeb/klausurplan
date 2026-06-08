@@ -8,6 +8,7 @@ use Klausurplan\Api\MeController;
 use Klausurplan\Api\AdminApi;
 use Klausurplan\Api\StufenleitungApi;
 use Klausurplan\Api\LehrkraftApi;
+use Klausurplan\Api\AnwesenheitApi;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -153,6 +154,29 @@ $router->put('/nachschreibtermine/{id}', function (array $p): array {
 
 $router->post('/nachschreibtermine/{id}/klausuren', function (array $p): array {
     return LehrkraftApi::postNachschreibterminKlausuren((int) $p['id'], Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Anwesenheit
+// ------------------------------------------------------------------
+$router->get('/anwesenheit/{klausur_id}', function (array $p): array {
+    return AnwesenheitApi::getAnwesenheit((int) $p['klausur_id']);
+}, 'admin', 'stufenleitung', 'lehrkraft');
+
+$router->post('/anwesenheit/{klausur_id}', function (array $p): array {
+    $eintraege = Router::jsonBody();
+    if (!is_array($eintraege)) {
+        http_response_code(400);
+        return ['fehler' => 'Array erwartet'];
+    }
+    return AnwesenheitApi::postAnwesenheit((int) $p['klausur_id'], $eintraege);
+}, 'admin', 'stufenleitung', 'lehrkraft');
+
+// ------------------------------------------------------------------
+// Stufenleitung – Entschuldigung
+// ------------------------------------------------------------------
+$router->post('/stufenleitung/entschuldigung/{anwesenheit_id}', function (array $p): array {
+    return AnwesenheitApi::postEntschuldigung((int) $p['anwesenheit_id'], Router::jsonBody());
 }, 'admin', 'stufenleitung');
 
 // ------------------------------------------------------------------

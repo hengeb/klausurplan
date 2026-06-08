@@ -554,3 +554,156 @@ main {
 }
 
 .check-zeile input[type="checkbox"] { flex-shrink: 0; }
+
+/* ---------------------------------------------------------------------------
+   Klausur-Verknüpfung mit Nachschreiber-Anzeige
+--------------------------------------------------------------------------- */
+
+.vk-liste {
+    max-height: 380px;
+}
+
+.vk-zeile {
+    align-items: flex-start;
+    padding: .3rem 0;
+}
+
+.vk-kursblock {
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+}
+
+.vk-kursname {
+    font-size: .875rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .25rem;
+}
+
+.vk-nachschreiber {
+    font-size: .8rem;
+    color: #555;
+    line-height: 1.5;
+}
+
+.vk-schueler {
+    display: inline;
+    border-radius: 3px;
+    padding: .05rem .2rem;
+    transition: background .15s, color .15s;
+}
+
+.vk-konflikt {
+    background: #fff3cd;
+    color: #856404;
+    font-weight: 600;
+    outline: 1px solid #ffc107;
+    outline-offset: 1px;
+}
+
+.vk-keine-ns {
+    color: #bbb;
+}
+
+.vk-trenner {
+    color: #bbb;
+}
+
+.vk-summary {
+    margin: 0 0 .6rem;
+    font-size: .875rem;
+}
+
+.warn-text {
+    color: #856404;
+}
+
+/* ---------------------------------------------------------------------------
+   Anwesenheits-Dialog
+--------------------------------------------------------------------------- */
+
+.dialog-anwesenheit {
+    min-width: 480px;
+    max-width: 720px;
+    width: 92vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.aw-tabelle-wrapper {
+    overflow-y: auto;
+    max-height: 55vh;
+    border: 1px solid #e8edf2;
+    border-radius: 4px;
+}
+
+.aw-tabelle {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.aw-tabelle th,
+.aw-tabelle td {
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid #e8edf2;
+}
+
+.aw-tabelle th {
+    background: #f5f7fa;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    color: #333;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.aw-tabelle tbody tr:hover td { background: #fafbfc; }
+
+.td-status { white-space: nowrap; }
+
+.td-aktionen { white-space: nowrap; }
+
+.status-gruppe {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.btn-status {
+    padding: 0.2rem 0.55rem;
+    border: 1px solid #c8cdd5;
+    border-radius: 3px;
+    background: #f5f7fa;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background .1s, border-color .1s;
+    color: #444;
+}
+
+.btn-status:hover { background: #e8edf2; }
+
+.btn-status.aktiv.status-anwesend {
+    background: #eafaf1;
+    border-color: #27ae60;
+    color: #1e8449;
+    font-weight: 600;
+}
+
+.btn-status.aktiv.status-fehlend {
+    background: #fdf0ee;
+    border-color: #e74c3c;
+    color: #c0392b;
+    font-weight: 600;
+}
+
+.btn-status.aktiv.status-ausstehend {
+    background: #fef9e7;
+    border-color: #f39c12;
+    color: #9a7d0a;
+    font-weight: 600;
+}

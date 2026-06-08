@@ -3,12 +3,34 @@
 declare(strict_types=1);
 
 use Klausurplan\Auth\Session;
+use Klausurplan\Api\AnwesenheitApi;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->load();
 
+// ------------------------------------------------------------------
+// Token-basierte Seiten – kein Login erforderlich
+// ------------------------------------------------------------------
+$path  = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+$token = trim($_GET['token'] ?? '');
+
+if ($path === '/anwesenheit/alle-da' && $token !== '') {
+    AnwesenheitApi::alleDa($token);
+}
+
+if ($path === '/anwesenheit/eingabe' && $token !== '') {
+    AnwesenheitApi::eingabeSeite($token);
+}
+
+if ($path === '/anwesenheit/token-eintrag' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    AnwesenheitApi::tokenEintrag();
+}
+
+// ------------------------------------------------------------------
+// Authentifizierte Seiten
+// ------------------------------------------------------------------
 Session::start();
 
 // CSP senden – überschreibt ggf. eine restriktivere Server-Policy

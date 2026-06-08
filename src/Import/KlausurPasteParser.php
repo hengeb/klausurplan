@@ -73,7 +73,7 @@ class KlausurPasteParser
         return ['zeilen' => $zeilen, 'fehler' => $fehler];
     }
 
-    /** TT.MM.JJJJ → JJJJ-MM-TT oder null bei Fehler */
+    /** TT.MM.JJJJ oder TT.MM.JJ → JJJJ-MM-TT oder null bei Fehler */
     public static function parseDatum(string $str): ?string
     {
         $str = trim($str);
@@ -81,10 +81,11 @@ class KlausurPasteParser
             return null;
         }
 
-        if (preg_match('#^(\d{1,2})\.(\d{1,2})\.(\d{4})$#', $str, $m)) {
+        // TT.MM.JJJJ oder TT.MM.JJ
+        if (preg_match('#^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$#', $str, $m)) {
             $tag   = (int) $m[1];
             $monat = (int) $m[2];
-            $jahr  = (int) $m[3];
+            $jahr  = strlen($m[3]) === 2 ? 2000 + (int) $m[3] : (int) $m[3];
 
             if (!checkdate($monat, $tag, $jahr)) {
                 return null;
@@ -96,7 +97,7 @@ class KlausurPasteParser
         return null;
     }
 
-    /** H:MM oder HH:MM → HH:MM:00 oder null */
+    /** H:MM, HH:MM oder HH:MM:SS → HH:MM:00 oder null */
     public static function parseUhrzeit(string $str): ?string
     {
         $str = trim($str);
@@ -104,7 +105,7 @@ class KlausurPasteParser
             return null;
         }
 
-        if (preg_match('#^(\d{1,2}):(\d{2})$#', $str, $m)) {
+        if (preg_match('#^(\d{1,2}):(\d{2})(?::\d{2})?$#', $str, $m)) {
             $h = (int) $m[1];
             $i = (int) $m[2];
 

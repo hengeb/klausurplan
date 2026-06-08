@@ -645,7 +645,7 @@ function renderKlausurenUebersicht(el, klausuren) {
                         <th>Dauer</th>
                         <th>Raum</th>
                         <th>TN</th>
-                        ${hatRolle('admin', 'stufenleitung') ? '<th></th>' : ''}
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -665,6 +665,15 @@ function renderKlausurenUebersicht(el, klausuren) {
             });
         });
     }
+
+    // Anwesenheits-Buttons
+    el.querySelectorAll('.btn-anwesenheit').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const k  = klausuren.find(x => x.id === id);
+            if (k) zeigeAnwesenheitDialog(k);
+        });
+    });
 }
 
 function renderKlausurZeile(k) {
@@ -676,6 +685,12 @@ function renderKlausurZeile(k) {
         ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}`
         : `<span class="fehlend">${escHtml(k.lehrer_kuerzel ?? '–')}</span>`;
 
+    const aktionen = [];
+    if (hatRolle('admin', 'stufenleitung')) {
+        aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-klausur-bearbeiten" data-id="${k.id}">Bearbeiten</button>`);
+    }
+    aktionen.push(`<button class="btn btn-klein btn-anwesenheit" data-id="${k.id}">Anwesenheit</button>`);
+
     return `
         <tr>
             <td>${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : ''}</td>
@@ -686,7 +701,7 @@ function renderKlausurZeile(k) {
             <td>${dauer}</td>
             <td>${raum}</td>
             <td>${k.schueler_anzahl}</td>
-            ${hatRolle('admin', 'stufenleitung') ? `<td><button class="btn btn-klein btn-sekundaer btn-klausur-bearbeiten" data-id="${k.id}">Bearbeiten</button></td>` : ''}
+            <td class="td-aktionen">${aktionen.join(' ')}</td>
         </tr>`;
 }
 
@@ -970,6 +985,199 @@ function parsePasteVorschau(text, vorschauEl, nachImport) {
 }
 
 // ---------------------------------------------------------------------------
+// Anwesenheits-Dialog
+// ---------------------------------------------------------------------------
+
+async function zeigeAnwesenheitDialog(klausur) {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+        <div class="dialog dialog-anwesenheit">
+            <h3>Anwesenheit</h3>
+            <p class="dialog-kursname">
+                ${escHtml(klausur.kurs_anzeigename)}
+                ${klausur.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${klausur.klausur_nr})</span>` : ''}
+                ${klausur.termin_datum ? ' – ' + formatDatum(klausur.termin_datum) : ''}
+            </p>
+            <div id="aw-inhalt"><p class="lade-text">Wird geladen…</p></div>
+            <div class="dialog-aktionen" style="margin-top:1rem">
+                <button class="btn" id="aw-speichern" disabled>Speichern</button>
+                <button class="btn btn-sekundaer" id="aw-schliessen">Schließen</button>
+            </div>
+            <p id="aw-fehler" class="fehler" style="display:none"></p>
+            <p id="aw-ok" class="ok-text" style="display:none"></p>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#aw-schliessen').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    // Anwesenheitsdaten laden
+    let eintraege = [];
+    try {
+        eintraege = await apiFetch(`/anwesenheit/${klausur.id}`);
+    } catch (err) {
+        overlay.querySelector('#aw-inhalt').innerHTML = `<p class="fehler">${err.message}</p>`;
+        return;
+    }
+
+    if (eintraege.length === 0) {
+        overlay.querySelector('#aw-inhalt').innerHTML =
+            '<p class="hinweis">Keine Prüflinge diesem Kurs zugeordnet.</p>';
+        return;
+    }
+
+    const status = {}; // kurs_schueler_id → { status, kommentar }
+    for (const e of eintraege) {
+        status[e.kurs_schueler_id] = {
+            status:       e.status,
+            kommentar:    e.kommentar ?? '',
+            entschuldigt: !!e.entschuldigt,
+        };
+    }
+
+    const zeilen = eintraege.map(e => {
+        const name = e.nachname
+            ? `${escHtml(e.nachname)}, ${escHtml(e.vorname ?? '')}`
+            : escHtml((e.name_roh ?? '').replace('|', ', '));
+
+        return `
+        <tr class="aw-zeile" data-id="${e.kurs_schueler_id}" data-aid="${e.anwesenheit_id ?? ''}">
+            <td>${name}</td>
+            <td class="td-status">
+                <div class="status-gruppe">
+                    <button type="button" class="btn-status ${e.status === 'anwesend' ? 'aktiv status-anwesend' : ''}"
+                            data-status="anwesend">Anwesend</button>
+                    <button type="button" class="btn-status ${e.status === 'fehlend' ? 'aktiv status-fehlend' : ''}"
+                            data-status="fehlend">Fehlend</button>
+                    <button type="button" class="btn-status ${e.status === 'ausstehend' ? 'aktiv status-ausstehend' : ''}"
+                            data-status="ausstehend">?</button>
+                </div>
+            </td>
+            <td>
+                <input type="text" class="aw-kommentar" placeholder="Kommentar"
+                       value="${escHtml(e.kommentar ?? '')}"
+                       style="width:100%;max-width:200px;padding:.25rem .4rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
+            </td>
+            ${hatRolle('admin', 'stufenleitung') ? `
+            <td>
+                <label class="check-zeile" style="gap:.3rem">
+                    <input type="checkbox" class="aw-entschuldigt" ${e.entschuldigt ? 'checked' : ''}
+                           ${e.status !== 'fehlend' ? 'disabled' : ''}>
+                    Entsch.
+                </label>
+            </td>` : ''}
+        </tr>`;
+    }).join('');
+
+    overlay.querySelector('#aw-inhalt').innerHTML = `
+        <div style="margin-bottom:.5rem">
+            <button class="btn btn-klein btn-sekundaer" id="aw-alle-anwesend">Alle anwesend</button>
+        </div>
+        <div class="tabelle-wrapper aw-tabelle-wrapper">
+            <table class="aw-tabelle">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Kommentar</th>
+                        ${hatRolle('admin', 'stufenleitung') ? '<th>Entschuldigt</th>' : ''}
+                    </tr>
+                </thead>
+                <tbody>${zeilen}</tbody>
+            </table>
+        </div>
+    `;
+
+    overlay.querySelector('#aw-speichern').disabled = false;
+
+    // Alle anwesend
+    overlay.querySelector('#aw-alle-anwesend').addEventListener('click', () => {
+        overlay.querySelectorAll('.aw-zeile').forEach(zeile => {
+            setzeStatus(zeile, 'anwesend', status);
+        });
+    });
+
+    // Status-Toggle
+    overlay.querySelectorAll('.btn-status').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const zeile = btn.closest('.aw-zeile');
+            setzeStatus(zeile, btn.dataset.status, status);
+        });
+    });
+
+    // Kommentar-Änderung tracken
+    overlay.querySelectorAll('.aw-kommentar').forEach(input => {
+        input.addEventListener('input', () => {
+            const id = parseInt(input.closest('.aw-zeile').dataset.id);
+            status[id].kommentar = input.value;
+        });
+    });
+
+    // Entschuldigt tracken (nur admin/SL)
+    if (hatRolle('admin', 'stufenleitung')) {
+        overlay.querySelectorAll('.aw-entschuldigt').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const id = parseInt(cb.closest('.aw-zeile').dataset.id);
+                status[id].entschuldigt = cb.checked;
+            });
+        });
+    }
+
+    // Speichern
+    overlay.querySelector('#aw-speichern').addEventListener('click', async () => {
+        const btn     = overlay.querySelector('#aw-speichern');
+        const fehlerEl = overlay.querySelector('#aw-fehler');
+        const okEl    = overlay.querySelector('#aw-ok');
+        btn.disabled  = true;
+        fehlerEl.style.display = 'none';
+        okEl.style.display     = 'none';
+
+        const eintraegePut = Object.entries(status).map(([id, s]) => ({
+            kurs_schueler_id: parseInt(id),
+            status:           s.status,
+            kommentar:        s.kommentar || '',
+        }));
+
+        try {
+            const res = await apiFetch(`/anwesenheit/${klausur.id}`, {
+                method:  'POST',
+                body:    JSON.stringify(eintraegePut),
+            });
+            okEl.textContent  = `✓ ${res.gespeichert} Eintrag/Einträge gespeichert.`;
+            okEl.style.display = '';
+        } catch (err) {
+            fehlerEl.textContent  = err.message;
+            fehlerEl.style.display = '';
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
+function setzeStatus(zeile, neuerStatus, statusObj) {
+    const id = parseInt(zeile.dataset.id);
+    statusObj[id].status = neuerStatus;
+    zeile.querySelectorAll('.btn-status').forEach(b => {
+        b.classList.remove('aktiv', 'status-anwesend', 'status-fehlend', 'status-ausstehend');
+        if (b.dataset.status === neuerStatus) {
+            b.classList.add('aktiv', `status-${neuerStatus}`);
+        }
+    });
+
+    // Entschuldigt-Checkbox nur bei 'fehlend' aktiv
+    const entschCb = zeile.querySelector('.aw-entschuldigt');
+    if (entschCb) {
+        entschCb.disabled = neuerStatus !== 'fehlend';
+        if (neuerStatus !== 'fehlend') {
+            entschCb.checked = false;
+            statusObj[id].entschuldigt = false;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // View: Nachschreibtermine
 // ---------------------------------------------------------------------------
 
@@ -1074,7 +1282,7 @@ function renderNachschreibtermineList(el, termine) {
             if (!bereich.classList.contains('versteckt') && bereich.children.length === 0) {
                 bereich.innerHTML = '<p class="lade-text">Klausuren werden geladen…</p>';
                 try {
-                    const alleKlausuren = await apiFetch('/klausuren');
+                    const alleKlausuren = await apiFetch('/klausuren?nachschreiber=1');
                     const t = termine.find(x => x.id === id);
                     renderKlausurVerknuepfung(bereich, id, alleKlausuren, t.klausuren, () => {
                         bereich.classList.add('versteckt');
@@ -1148,20 +1356,95 @@ function renderNachschreibterminFormular(el, vorhandener, nachSpeichern) {
 }
 
 function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, nachSpeichern) {
-    const bereitsIds = new Set(bereitsVerknuepft.map(k => k.id));
+    const bereitsIds  = new Set(bereitsVerknuepft.map(k => k.id));
+    const ausgewaehlt = new Set(bereitsIds);
 
-    const zeilen = alleKlausuren.map(k => `
-        <label class="check-zeile">
-            <input type="checkbox" value="${k.id}" ${bereitsIds.has(k.id) ? 'checked' : ''}>
-            ${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` (Nr. ${k.klausur_nr})` : ''}
-            <span class="hinweis">${k.termin_datum ? ' – ' + formatDatum(k.termin_datum) : ''}</span>
-        </label>
-    `).join('');
+    // Eindeutiger Schlüssel pro Person (bevorzugt benutzer_id, sonst name_roh)
+    function nsKey(ns) {
+        return ns.benutzer_id ? `b_${ns.benutzer_id}` : `r_${ns.name_roh}`;
+    }
+
+    // Berechnet Konflikte: Schlüssel aller Nachschreiber*innen, die in >1 gewählter Klausur fehlten
+    function berechneKonflikte() {
+        const schuelerKlausuren = {}; // key → Set of klausur_ids
+        for (const k of alleKlausuren) {
+            if (!ausgewaehlt.has(k.id)) continue;
+            for (const ns of (k.nachschreiber ?? [])) {
+                const key = nsKey(ns);
+                (schuelerKlausuren[key] ??= new Set()).add(k.id);
+            }
+        }
+        return new Set(
+            Object.entries(schuelerKlausuren)
+                .filter(([, ids]) => ids.size > 1)
+                .map(([key]) => key)
+        );
+    }
+
+    function schuelerAnzeigename(ns) {
+        return ns.nachname
+            ? `${escHtml(ns.nachname)}, ${escHtml(ns.vorname ?? '')}`
+            : escHtml((ns.name_roh ?? '').replace('|', ', '));
+    }
+
+    // Zusammenfassung und Konflikt-Hervorhebungen aktualisieren
+    function aktualisiereAnzeige() {
+        const konflikte = berechneKonflikte();
+
+        // Gesamtzahl eindeutiger Nachschreiber*innen
+        const alleKeys = new Set();
+        for (const k of alleKlausuren) {
+            if (!ausgewaehlt.has(k.id)) continue;
+            for (const ns of (k.nachschreiber ?? [])) alleKeys.add(nsKey(ns));
+        }
+
+        const summaryEl = el.querySelector('.vk-summary');
+        if (alleKeys.size === 0) {
+            summaryEl.innerHTML = '<span class="hinweis">Keine Nachschreiber*innen ausgewählt.</span>';
+        } else if (konflikte.size === 0) {
+            summaryEl.innerHTML =
+                `<span class="ok-text">${alleKeys.size} Nachschreiber*in(nen) ausgewählt</span>`;
+        } else {
+            summaryEl.innerHTML =
+                `<span class="warn-text">${alleKeys.size} Nachschreiber*in(nen) ausgewählt – `
+                + `${konflikte.size} Konflikt(e): dieselbe Person in mehreren Klausuren</span>`;
+        }
+
+        // Namens-Spans ein-/ausblenden Konfliktfarbe
+        el.querySelectorAll('.vk-schueler').forEach(span => {
+            span.classList.toggle('vk-konflikt', konflikte.has(span.dataset.key));
+        });
+
+        el.dataset.hatKonflikte = konflikte.size > 0 ? '1' : '0';
+    }
+
+    // HTML bauen
+    const zeilen = alleKlausuren.map(k => {
+        const nachschreiber = k.nachschreiber ?? [];
+        const datum = k.termin_datum ? ' – ' + formatDatum(k.termin_datum) : '';
+        const nsSpans = nachschreiber.map(ns => {
+            const key = escHtml(nsKey(ns));
+            return `<span class="vk-schueler" data-key="${key}">${schuelerAnzeigename(ns)}</span>`;
+        });
+        const nsHtml = nsSpans.length > 0
+            ? nsSpans.join('<span class="vk-trenner"> · </span>')
+            : '<span class="vk-keine-ns">–</span>';
+
+        return `
+        <label class="check-zeile vk-zeile">
+            <input type="checkbox" value="${k.id}" ${bereitsIds.has(k.id) ? 'checked' : ''} style="flex-shrink:0;margin-top:.2rem">
+            <span class="vk-kursblock">
+                <span class="vk-kursname">${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : ''}${datum ? `<span class="hinweis">${datum}</span>` : ''}</span>
+                <span class="vk-nachschreiber">${nsHtml}</span>
+            </span>
+        </label>`;
+    }).join('');
 
     el.innerHTML = `
         <div class="nt-formular">
+            <p class="vk-summary"></p>
             <p><strong>Klausuren für diesen Nachschreibtermin:</strong></p>
-            <div class="check-liste">${zeilen || '<p class="hinweis">Keine Klausuren vorhanden.</p>'}</div>
+            <div class="check-liste vk-liste">${zeilen || '<p class="hinweis">Keine Klausuren vorhanden.</p>'}</div>
             <div class="formular-zeile" style="margin-top:.75rem">
                 <button class="btn nt-kl-speichern">Speichern</button>
                 <button class="btn btn-sekundaer nt-kl-abbrechen">Abbrechen</button>
@@ -1170,21 +1453,36 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
         </div>
     `;
 
+    aktualisiereAnzeige();
+
+    el.querySelectorAll('.vk-liste input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const id = parseInt(cb.value);
+            cb.checked ? ausgewaehlt.add(id) : ausgewaehlt.delete(id);
+            aktualisiereAnzeige();
+        });
+    });
+
     el.querySelector('.nt-kl-abbrechen').addEventListener('click', () => nachSpeichern());
 
     el.querySelector('.nt-kl-speichern').addEventListener('click', async () => {
-        const btn = el.querySelector('.nt-kl-speichern');
+        const btn     = el.querySelector('.nt-kl-speichern');
         const fehlerEl = el.querySelector('.nt-fehler');
+
+        if (el.dataset.hatKonflikte === '1') {
+            if (!confirm(
+                'Achtung: Es gibt Konflikte – dieselbe Nachschreiberin bzw. derselbe Nachschreiber '
+                + 'erscheint in mehreren ausgewählten Klausuren.\n\nTrotzdem speichern?'
+            )) return;
+        }
+
         btn.disabled = true;
         fehlerEl.style.display = 'none';
-
-        const ausgewaehlte = [...el.querySelectorAll('.check-liste input:checked')]
-            .map(cb => parseInt(cb.value));
 
         try {
             await apiFetch(`/nachschreibtermine/${ntId}/klausuren`, {
                 method: 'POST',
-                body: JSON.stringify({ klausur_ids: ausgewaehlte }),
+                body: JSON.stringify({ klausur_ids: [...ausgewaehlt] }),
             });
             nachSpeichern();
         } catch (err) {

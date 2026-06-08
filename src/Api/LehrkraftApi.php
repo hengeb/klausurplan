@@ -77,8 +77,40 @@ class LehrkraftApi
              ORDER BY k.termin_datum IS NULL, k.termin_datum, k.termin_uhrzeit, kurs.anzeigename"
         );
         $stmt->execute($params);
+        $klausuren = $stmt->fetchAll();
 
-        return $stmt->fetchAll();
+        // Optionaler Parameter: fehlende Schüler*innen je Klausur anhängen
+        if (isset($_GET['nachschreiber']) && !empty($klausuren)) {
+            $klausurIds  = array_column($klausuren, 'id');
+            $platzhalter = implode(',', array_fill(0, count($klausurIds), '?'));
+
+            $nsStmt = $db->prepare(
+                "SELECT a.klausur_id,
+                        ks.id   AS kurs_schueler_id,
+                        ks.name_roh,
+                        b.id    AS benutzer_id,
+                        b.vorname,
+                        b.nachname
+                 FROM anwesenheiten a
+                 JOIN kurs_schueler ks ON ks.id = a.kurs_schueler_id
+                 LEFT JOIN benutzer b  ON b.id  = ks.schueler_id
+                 WHERE a.klausur_id IN ($platzhalter) AND a.status = 'fehlend'
+                 ORDER BY COALESCE(b.nachname, ks.name_roh), b.vorname"
+            );
+            $nsStmt->execute($klausurIds);
+
+            $nsMap = [];
+            foreach ($nsStmt->fetchAll() as $ns) {
+                $nsMap[$ns['klausur_id']][] = $ns;
+            }
+
+            foreach ($klausuren as &$k) {
+                $k['nachschreiber'] = $nsMap[$k['id']] ?? [];
+            }
+            unset($k);
+        }
+
+        return $klausuren;
     }
 
     // ------------------------------------------------------------------
@@ -306,7 +338,7 @@ class LehrkraftApi
         $out = fopen('php://output', 'w');
         fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM für Excel
 
-        fputcsv($out, ['Kurs', 'Anzeigename', 'Anzahl', 'Datum', 'Uhrzeit', 'Dauer', 'Raum'], ';');
+        fputcsv($out, ['Kurs', 'Anzeigename', 'TN', 'Datum', 'Uhrzeit', 'Dauer', 'Raum'], ';');
 
         foreach ($kurse as $k) {
             fputcsv($out, [$k['kurs_kuerzel'], $k['anzeigename'], $k['anzahl'], '', '', '', ''], ';');
