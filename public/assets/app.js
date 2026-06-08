@@ -605,8 +605,9 @@ async function viewHalbjahre(el) {
                 if (form) {
                     form.addEventListener('submit', async ev => {
                         ev.preventDefault();
-                        const bezeichnung = form.querySelector('[name="bezeichnung"]').value.trim();
-                        const kursart     = form.querySelector('[name="kursart"]').value;
+                        const bezeichnung    = form.querySelector('[name="bezeichnung"]').value.trim();
+                        const kursart        = form.querySelector('[name="kursart"]').value;
+                        const lehrerKuerzel  = form.querySelector('[name="lehrer_kuerzel"]').value.trim() || null;
                         if (!bezeichnung) return;
 
                         const submitBtn = form.querySelector('[type="submit"]');
@@ -615,7 +616,7 @@ async function viewHalbjahre(el) {
                         try {
                             const neuerKurs = await apiFetch(`/stufenleitung/halbjahre/${hjId}/kurse`, {
                                 method: 'POST',
-                                body: JSON.stringify({ bezeichnung, kursart }),
+                                body: JSON.stringify({ bezeichnung, kursart, lehrer_kuerzel: lehrerKuerzel }),
                             });
                             const tbody = ziel.querySelector('tbody');
                             tbody.querySelector('tr td[colspan]')?.closest('tr')?.remove();
@@ -662,11 +663,12 @@ function renderKursAddFormHTML(hjId) {
     if (!hatRolle('admin', 'stufenleitung')) return '';
     return `
     <form class="kurs-add-form" data-hj-id="${hjId}" style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <input type="text" name="bezeichnung" placeholder="Kursbezeichnung (z.B. SP_Q2_GK1_SZ)" required maxlength="50" style="flex:1;min-width:200px">
+        <input type="text" name="bezeichnung" placeholder="Kursbezeichnung (z.B. SP_Q2_GK1_SZ)" required maxlength="50" style="flex:2;min-width:200px">
         <select name="kursart">
             <option value="GK">GK</option>
             <option value="LK">LK</option>
         </select>
+        <input type="text" name="lehrer_kuerzel" placeholder="Kürzel Lehrkraft" maxlength="20" style="width:9rem">
         <button type="submit" class="btn btn-klein">Hinzufügen</button>
     </form>`;
 }

@@ -58,9 +58,7 @@ class StufenleitungApi
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
-        // GoMST-Einträge ohne Moodle-Konto – eine Zeile pro Person (name_roh)
-        // Nur GoMST-Einträge (name_roh enthält '|'); manuell hinzugefügte Zusatzschüler
-        // haben kein Moodle-Konto und brauchen keine Zuordnung.
+        // Alle nicht zugeordneten Prüflinge – GoMST-Einträge (mit '|') und Zusatzschüler
         $schuelerGomst = $db->query(
             "SELECT ks.name_roh,
                     COUNT(DISTINCT ks.id)                                         AS anzahl_kurse,
@@ -70,7 +68,6 @@ class StufenleitungApi
              JOIN halbjahre h ON h.id = k.halbjahr_id
              JOIN stufen s    ON s.id = h.stufe_id
              WHERE ks.schueler_id IS NULL
-               AND ks.name_roh LIKE '%|%'
              GROUP BY ks.name_roh
              ORDER BY ks.name_roh"
         )->fetchAll();
@@ -282,7 +279,66 @@ class StufenleitungApi
             'INSERT INTO kurs_schueler (kurs_id, name_roh) VALUES (?, ?)'
         )->execute([$kursId, $name]);
 
-        return ['kurs_schueler_id' => (int) $db->lastInsertId(), 'name_roh' => $name];
+        $ksId = (int) $db->lastInsertId();
+
+        // Automatisches Namensmatching (wie GoMST-Import)
+        $schuelerId = self::versucheNamensmatching($db, $name);
+        if ($schuelerId !== null) {
+            $db->prepare('UPDATE kurs_schueler SET schueler_id = ? WHERE id = ?')
+               ->execute([$schuelerId, $ksId]);
+        }
+
+        return ['kurs_schueler_id' => $ksId, 'name_roh' => $name, 'schueler_id' => $schuelerId];
+    }
+
+    /**
+     * Parst einen Anzeigenamen in (nachname, vorname).
+     * Formate: "Nachname|Vorname", "Nachname, Vorname", "Vorname Nachname"
+     *
+     * @return array{0: string, 1: string}
+     */
+    private static function parseNameZusatz(string $name): array
+    {
+        if (str_contains($name, '|')) {
+            [$n, $v] = array_pad(explode('|', $name, 2), 2, '');
+            return [trim($n), trim($v)];
+        }
+        if (str_contains($name, ',')) {
+            $i = strpos($name, ',');
+            return [trim(substr($name, 0, $i)), trim(substr($name, $i + 1))];
+        }
+        $j = strpos(trim($name), ' ');
+        if ($j !== false) {
+            $parts = trim($name);
+            return [trim(substr($parts, $j + 1)), trim(substr($parts, 0, $j))];
+        }
+        return [trim($name), ''];
+    }
+
+    /**
+     * Sucht einen passenden Benutzer anhand des Namens.
+     * Unterstützt GoMST-Format (Nachname|Vorname), Komma- und Leerzeichen-Trennung.
+     */
+    private static function versucheNamensmatching(\PDO $db, string $nameRoh): ?int
+    {
+        [$nachname, $vorname] = self::parseNameZusatz($nameRoh);
+        if ($nachname === '' && $vorname === '') {
+            return null;
+        }
+
+        $erstVorname = strtok($vorname, ' ') ?: $vorname;
+
+        $stmt = $db->prepare(
+            'SELECT id FROM benutzer
+             WHERE LOWER(TRIM(nachname)) = LOWER(?)
+               AND (LOWER(TRIM(vorname)) = LOWER(?)
+                    OR LOWER(TRIM(SUBSTRING_INDEX(vorname, \' \', 1))) = LOWER(?))
+             ORDER BY CASE WHEN LOWER(TRIM(vorname)) = LOWER(?) THEN 0 ELSE 1 END
+             LIMIT 1'
+        );
+        $stmt->execute([$nachname, $vorname, $erstVorname, $vorname]);
+        $id = $stmt->fetchColumn();
+        return $id !== false ? (int) $id : null;
     }
 
     /**
@@ -414,20 +470,17 @@ class StufenleitungApi
     /**
      * Legt einen Kurs manuell für ein Halbjahr an.
      *
-     * Body: { bezeichnung: string, kursart: 'LK'|'GK', fach_kuerzel?: string }
-     * @return array{id: int, kurs_kuerzel: string, anzeigename: string, fach_kuerzel: string,
-     *               kursart: string, lehrer_kuerzel: null, lehrer_id: null,
-     *               lehrer_vorname: null, lehrer_nachname: null,
-     *               schueler_gesamt: int, schueler_zugeordnet: int}
+     * Body: { bezeichnung: string, kursart: 'LK'|'GK', fach_kuerzel?: string, lehrer_kuerzel?: string }
      */
     public static function addKurs(int $halbjahrId, array $body): array
     {
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
-        $bezeichnung = trim($body['bezeichnung'] ?? '');
-        $kursart     = $body['kursart'] ?? 'GK';
-        $fachKuerzel = strtoupper(trim($body['fach_kuerzel'] ?? ''));
+        $bezeichnung   = trim($body['bezeichnung'] ?? '');
+        $kursart       = $body['kursart'] ?? 'GK';
+        $fachKuerzel   = strtoupper(trim($body['fach_kuerzel'] ?? ''));
+        $lehrerKuerzel = strtoupper(trim($body['lehrer_kuerzel'] ?? '')) ?: null;
 
         if ($bezeichnung === '') {
             http_response_code(400);
@@ -460,10 +513,31 @@ class StufenleitungApi
             throw new RuntimeException('Ein Kurs mit dieser Bezeichnung existiert bereits in diesem Halbjahr.');
         }
 
+        // Lehrerkürzel zu benutzer_id auflösen
+        $lehrerId      = null;
+        $lehrerVorname = null;
+        $lehrerNachname = null;
+        if ($lehrerKuerzel !== null) {
+            $ls = $db->prepare(
+                'SELECT b.id, b.vorname, b.nachname
+                 FROM benutzer b
+                 JOIN rollen r ON r.benutzer_id = b.id AND r.rolle = \'lehrkraft\'
+                 WHERE UPPER(b.kuerzel) = ?
+                 LIMIT 1'
+            );
+            $ls->execute([$lehrerKuerzel]);
+            $lehrer = $ls->fetch();
+            if ($lehrer !== false) {
+                $lehrerId       = (int) $lehrer['id'];
+                $lehrerVorname  = $lehrer['vorname'];
+                $lehrerNachname = $lehrer['nachname'];
+            }
+        }
+
         $db->prepare(
-            'INSERT INTO kurse (halbjahr_id, kurs_kuerzel, fach_kuerzel, kursart, anzeigename)
-             VALUES (?, ?, ?, ?, ?)'
-        )->execute([$halbjahrId, $bezeichnung, $fachKuerzel, $kursart, $bezeichnung]);
+            'INSERT INTO kurse (halbjahr_id, kurs_kuerzel, fach_kuerzel, kursart, anzeigename, lehrer_kuerzel, lehrer_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$halbjahrId, $bezeichnung, $fachKuerzel, $kursart, $bezeichnung, $lehrerKuerzel, $lehrerId]);
 
         return [
             'id'                  => (int) $db->lastInsertId(),
@@ -471,10 +545,10 @@ class StufenleitungApi
             'anzeigename'         => $bezeichnung,
             'fach_kuerzel'        => $fachKuerzel,
             'kursart'             => $kursart,
-            'lehrer_kuerzel'      => null,
-            'lehrer_id'           => null,
-            'lehrer_vorname'      => null,
-            'lehrer_nachname'     => null,
+            'lehrer_kuerzel'      => $lehrerKuerzel,
+            'lehrer_id'           => $lehrerId,
+            'lehrer_vorname'      => $lehrerVorname,
+            'lehrer_nachname'     => $lehrerNachname,
             'schueler_gesamt'     => 0,
             'schueler_zugeordnet' => 0,
         ];
