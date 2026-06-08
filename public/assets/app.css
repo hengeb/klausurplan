@@ -620,6 +620,19 @@ main {
     color: #856404;
 }
 
+/* Anwesenheitsstatus in der Klausuren-Übersicht */
+.aw-status-offen { color: #aaa; font-variant-numeric: tabular-nums; }
+.aw-status-teil  { color: #e67e22; font-weight: 600; font-variant-numeric: tabular-nums; }
+.aw-status-voll  { color: #27ae60; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Entschuldigt-Markierung bei Nachschreiber*innen */
+.vk-entsch {
+    font-size: .75rem;
+    font-style: italic;
+    color: #27ae60;
+    white-space: nowrap;
+}
+
 /* ---------------------------------------------------------------------------
    Anwesenheits-Dialog
 --------------------------------------------------------------------------- */

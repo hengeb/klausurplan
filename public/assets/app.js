@@ -645,6 +645,7 @@ function renderKlausurenUebersicht(el, klausuren) {
                         <th>Dauer</th>
                         <th>Raum</th>
                         <th>TN</th>
+                        <th>Anw.</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -701,6 +702,7 @@ function renderKlausurZeile(k) {
             <td>${dauer}</td>
             <td>${raum}</td>
             <td>${k.schueler_anzahl}</td>
+            <td>${renderAnwesenheitStatus(k.anwesenheit_erfasst, k.schueler_anzahl)}</td>
             <td class="td-aktionen">${aktionen.join(' ')}</td>
         </tr>`;
 }
@@ -1382,9 +1384,13 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
     }
 
     function schuelerAnzeigename(ns) {
-        return ns.nachname
+        const name = ns.nachname
             ? `${escHtml(ns.nachname)}, ${escHtml(ns.vorname ?? '')}`
             : escHtml((ns.name_roh ?? '').replace('|', ', '));
+        const entsch = ns.entschuldigt == 1
+            ? ' <span class="vk-entsch">entsch.</span>'
+            : '';
+        return name + entsch;
     }
 
     // Zusammenfassung und Konflikt-Hervorhebungen aktualisieren
@@ -1421,7 +1427,9 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
     // HTML bauen
     const zeilen = alleKlausuren.map(k => {
         const nachschreiber = k.nachschreiber ?? [];
-        const datum = k.termin_datum ? ' – ' + formatDatum(k.termin_datum) : '';
+        const datumStr = k.termin_datum ? formatDatum(k.termin_datum) : '';
+        const dauerStr = k.dauer_minuten ? `${k.dauer_minuten} min` : '';
+        const meta = [datumStr, dauerStr].filter(Boolean).join(', ');
         const nsSpans = nachschreiber.map(ns => {
             const key = escHtml(nsKey(ns));
             return `<span class="vk-schueler" data-key="${key}">${schuelerAnzeigename(ns)}</span>`;
@@ -1434,7 +1442,7 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
         <label class="check-zeile vk-zeile">
             <input type="checkbox" value="${k.id}" ${bereitsIds.has(k.id) ? 'checked' : ''} style="flex-shrink:0;margin-top:.2rem">
             <span class="vk-kursblock">
-                <span class="vk-kursname">${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : ''}${datum ? `<span class="hinweis">${datum}</span>` : ''}</span>
+                <span class="vk-kursname">${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : ''}${meta ? ` <span class="hinweis">– ${meta}</span>` : ''}</span>
                 <span class="vk-nachschreiber">${nsHtml}</span>
             </span>
         </label>`;
@@ -1496,6 +1504,19 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
 // ---------------------------------------------------------------------------
 // Hilfs­funktionen
 // ---------------------------------------------------------------------------
+
+/**
+ * Zeigt den Bearbeitungsstand der Anwesenheit als farbige Fraktion.
+ * erfasst / gesamt: "–" | "0/5" grau | "3/5" orange | "5/5" grün
+ */
+function renderAnwesenheitStatus(erfasst, gesamt) {
+    const g = parseInt(gesamt) || 0;
+    if (g === 0) return '–';
+    const e = parseInt(erfasst) || 0;
+    if (e === 0)    return `<span class="aw-status-offen">${e}/${g}</span>`;
+    if (e < g)      return `<span class="aw-status-teil">${e}/${g}</span>`;
+    return              `<span class="aw-status-voll">${e}/${g}</span>`;
+}
 
 /** YYYY-MM-DD → TT.MM.JJJJ */
 function formatDatum(str) {

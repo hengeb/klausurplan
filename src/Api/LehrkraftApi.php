@@ -67,7 +67,9 @@ class LehrkraftApi
                     lb.vorname        AS lehrer_vorname,
                     lb.nachname       AS lehrer_nachname,
                     lb.kuerzel        AS lehrer_kuerzel,
-                    (SELECT COUNT(*) FROM kurs_schueler ks WHERE ks.kurs_id = kurs.id) AS schueler_anzahl
+                    (SELECT COUNT(*) FROM kurs_schueler ks WHERE ks.kurs_id = kurs.id) AS schueler_anzahl,
+                    (SELECT COUNT(*) FROM anwesenheiten a
+                     WHERE a.klausur_id = k.id AND a.status != 'ausstehend')          AS anwesenheit_erfasst
              FROM klausuren k
              JOIN kurse kurs  ON kurs.id = k.kurs_id
              JOIN halbjahre h ON h.id    = kurs.halbjahr_id
@@ -86,11 +88,12 @@ class LehrkraftApi
 
             $nsStmt = $db->prepare(
                 "SELECT a.klausur_id,
-                        ks.id   AS kurs_schueler_id,
+                        ks.id        AS kurs_schueler_id,
                         ks.name_roh,
-                        b.id    AS benutzer_id,
+                        b.id         AS benutzer_id,
                         b.vorname,
-                        b.nachname
+                        b.nachname,
+                        a.entschuldigt
                  FROM anwesenheiten a
                  JOIN kurs_schueler ks ON ks.id = a.kurs_schueler_id
                  LEFT JOIN benutzer b  ON b.id  = ks.schueler_id
