@@ -97,10 +97,12 @@ class MoodleApi
                     $aktualisiert++;
                 }
 
-                // Basis-Rolle setzen falls noch nicht vorhanden
-                $basisRolle = $istLehrkraft ? 'lehrkraft' : 'schueler';
-                $db->prepare('INSERT IGNORE INTO rollen (benutzer_id, rolle) VALUES (?, ?)')
-                   ->execute([$benutzerId, $basisRolle]);
+                // Lehrkräfte korrigieren: falls durch LTI fälschlich als schueler angelegt,
+                // wird die Rolle auf lehrkraft geändert. Schüler*innen werden nicht angefasst.
+                if ($istLehrkraft) {
+                    $db->prepare('INSERT IGNORE INTO rollen (benutzer_id, rolle) VALUES (?, ?)')->execute([$benutzerId, 'lehrkraft']);
+                    $db->prepare('DELETE FROM rollen WHERE benutzer_id = ? AND rolle = ?')->execute([$benutzerId, 'schueler']);
+                }
             }
         }
 

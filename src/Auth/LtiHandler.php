@@ -52,16 +52,16 @@ class LtiHandler extends Tool
         $benutzer = $this->syncBenutzer($moodleId, $vorname, $nachname, $email, $kuerzel);
         $rollen   = $this->ladeRollen($benutzer['id']);
 
+        // Moodle-Systemadmins erhalten immer die Admin-Rolle (Bootstrapping)
         if ($userResult->isAdmin() && !in_array('admin', $rollen, true)) {
             $this->weiseRolleZu($benutzer['id'], 'admin');
             $rollen[] = 'admin';
         }
 
-        // Basis-Rolle automatisch setzen: Lehrkräfte erkennbar am Kürzel im Nachnamen
-        $basisRolle = ($kuerzel !== null) ? 'lehrkraft' : 'schueler';
-        if (!in_array($basisRolle, $rollen, true)) {
-            $this->weiseRolleZu($benutzer['id'], $basisRolle);
-            $rollen[] = $basisRolle;
+        // Basis-Rolle nur bei neuen Nutzer*innen setzen; bestehende Rollen bleiben unverändert
+        if ($benutzer['ist_neu']) {
+            $this->weiseRolleZu($benutzer['id'], 'schueler');
+            $rollen[] = 'schueler';
         }
 
         Session::start();
@@ -143,9 +143,10 @@ class LtiHandler extends Tool
             $stmt->execute([$moodleId, $vorname, $nachname, $email, $kuerzel]);
 
             return [
-                'id'       => (int) $this->db->lastInsertId(),
-                'vorname'  => $vorname,
-                'nachname' => $nachname,
+                'id'      => (int) $this->db->lastInsertId(),
+                'vorname' => $vorname,
+                'nachname'=> $nachname,
+                'ist_neu' => true,
             ];
         }
 
@@ -176,9 +177,10 @@ class LtiHandler extends Tool
         }
 
         return [
-            'id'       => (int) $vorhandener['id'],
-            'vorname'  => $vorname,
-            'nachname' => $nachname,
+            'id'      => (int) $vorhandener['id'],
+            'vorname' => $vorname,
+            'nachname'=> $nachname,
+            'ist_neu' => false,
         ];
     }
 
