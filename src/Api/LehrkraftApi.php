@@ -288,7 +288,8 @@ class LehrkraftApi
         if (!empty($halbjahrIds)) {
             $platzhalter = implode(',', array_fill(0, count($halbjahrIds), '?'));
             $stmt = $db->prepare(
-                "SELECT k.kurs_kuerzel, k.anzeigename
+                "SELECT k.kurs_kuerzel, k.anzeigename,
+                        (SELECT COUNT(*) FROM kurs_schueler ks WHERE ks.kurs_id = k.id) AS anzahl
                  FROM kurse k
                  WHERE k.halbjahr_id IN ($platzhalter)
                  ORDER BY k.anzeigename"
@@ -305,11 +306,10 @@ class LehrkraftApi
         $out = fopen('php://output', 'w');
         fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM für Excel
 
-        // Anzeigename als Hilfsspalte; Kurs = kurs_kuerzel (wird beim Import verwendet)
-        fputcsv($out, ['Kurs', 'Anzeigename', 'Datum', 'Uhrzeit', 'Dauer', 'Raum'], ';');
+        fputcsv($out, ['Kurs', 'Anzeigename', 'Anzahl', 'Datum', 'Uhrzeit', 'Dauer', 'Raum'], ';');
 
         foreach ($kurse as $k) {
-            fputcsv($out, [$k['kurs_kuerzel'], $k['anzeigename'], '', '', '', ''], ';');
+            fputcsv($out, [$k['kurs_kuerzel'], $k['anzeigename'], $k['anzahl'], '', '', '', ''], ';');
         }
 
         fclose($out);
