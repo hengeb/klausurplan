@@ -40,33 +40,43 @@ class MoodleApi
             $nachname = trim($mn['lastname']  ?? '');
             $kuerzel  = self::extraktKuerzel($nachname);
 
-            // E-Mail nur für Lehrkräfte importieren (erkennbar am Kürzel im Nachnamen)
-            $email = $kuerzel !== null ? ($mn['email'] ?? null) : null;
+            // E-Mail nur für Lehrkräfte importieren; leerer String = nicht öffentlich = null
+            $emailRaw = $mn['email'] ?? '';
+            $email    = ($kuerzel !== null && !empty($emailRaw)) ? $emailRaw : null;
 
             if (empty($vorname) || empty($nachname)) {
                 continue;
             }
 
-            $stmt = $db->prepare('SELECT id FROM benutzer WHERE moodle_id = ?');
+            $stmt = $db->prepare(
+                'SELECT vorname, nachname, email, kuerzel FROM benutzer WHERE moodle_id = ?'
+            );
             $stmt->execute([$moodleId]);
-            $vorhandeneId = $stmt->fetchColumn();
+            $vorhandener = $stmt->fetch();
 
-            if ($vorhandeneId === false) {
+            if ($vorhandener === false) {
                 $db->prepare(
                     'INSERT INTO benutzer (moodle_id, vorname, nachname, email, kuerzel)
                      VALUES (?, ?, ?, ?, ?)'
                 )->execute([$moodleId, $vorname, $nachname, $email, $kuerzel]);
                 $neu++;
             } else {
-                $db->prepare(
-                    'UPDATE benutzer
-                     SET vorname  = ?,
-                         nachname = ?,
-                         email    = ?,
-                         kuerzel  = CASE WHEN ? IS NOT NULL THEN ? ELSE kuerzel END
-                     WHERE moodle_id = ?'
-                )->execute([$vorname, $nachname, $email, $kuerzel, $kuerzel, $moodleId]);
-                $aktualisiert++;
+                $geandert = $vorhandener['vorname'] !== $vorname
+                    || $vorhandener['nachname'] !== $nachname
+                    || $vorhandener['email'] !== $email
+                    || ($kuerzel !== null && $vorhandener['kuerzel'] !== $kuerzel);
+
+                if ($geandert) {
+                    $db->prepare(
+                        'UPDATE benutzer
+                         SET vorname  = ?,
+                             nachname = ?,
+                             email    = ?,
+                             kuerzel  = CASE WHEN ? IS NOT NULL THEN ? ELSE kuerzel END
+                         WHERE moodle_id = ?'
+                    )->execute([$vorname, $nachname, $email, $kuerzel, $kuerzel, $moodleId]);
+                    $aktualisiert++;
+                }
             }
         }
 
@@ -76,7 +86,7 @@ class MoodleApi
     }
 
     /**
-     * Kommt ein Kürzel mehrfach vor, behält die Person mit der kleinsten Moodle-ID
+     * Kommt ein Kürzel mehrfach vor, behält die Person mit der größten Moodle-ID
      * das Kürzel; bei allen anderen wird es auf NULL gesetzt.
      */
     private function bereinigeDoppelteKuerzel(\PDO $db): void
@@ -88,7 +98,7 @@ class MoodleApi
         );
 
         while (($kuerzel = $stmt->fetchColumn()) !== false) {
-            // Alle Einträge mit diesem Kürzel, ältester zuerst (kleinste numerische Moodle-ID)
+            // Alle Einträge mit diesem Kürzel, neuester zuerst (größte numerische Moodle-ID)
             $dup = $db->prepare(
                 'SELECT id FROM benutzer
                  WHERE kuerzel = ?
@@ -101,7 +111,7 @@ class MoodleApi
                 $ids[] = $id;
             }
 
-            // Ersten (kleinste Moodle-ID) behalten, Rest auf NULL
+            // Ersten (größte Moodle-ID) behalten, Rest auf NULL
             array_shift($ids);
             if (!empty($ids)) {
                 $platzhalter = implode(',', array_fill(0, count($ids), '?'));
@@ -113,6 +123,8 @@ class MoodleApi
 
     /**
      * Gibt alle Nutzer*innen aus Moodle zurück (ldap + manual, dedupliziert nach ID).
+     * Für Lehrkräfte (erkennbar am Kürzel) werden E-Mails per core_user_get_users_by_field
+     * nachgeladen, da core_user_get_users die E-Mail-Privatsphäre der Nutzer*innen respektiert.
      */
     private function alleNutzer(): array
     {
@@ -139,7 +151,61 @@ class MoodleApi
             }
         }
 
+        // E-Mails für Lehrkräfte (mit Kürzel) gezielt nachladen
+        $lehrkraftIds = array_keys(array_filter(
+            $nutzer,
+            fn($u) => self::extraktKuerzel(trim($u['lastname'] ?? '')) !== null
+        ));
+
+        if (!empty($lehrkraftIds)) {
+            foreach ($this->emailsNachladen($lehrkraftIds) as $id => $email) {
+                if (isset($nutzer[$id])) {
+                    $nutzer[$id]['email'] = $email;
+                }
+            }
+        }
+
         return array_values($nutzer);
+    }
+
+    /**
+     * Lädt E-Mails für die angegebenen Moodle-User-IDs via core_user_get_users_by_field.
+     * Diese Funktion respektiert die E-Mail-Privatsphäre-Einstellung nicht.
+     *
+     * @param  int[]  $ids
+     * @return array<int, string>  Moodle-ID → E-Mail
+     */
+    private function emailsNachladen(array $ids): array
+    {
+        $emails  = [];
+
+        foreach (array_chunk($ids, 100) as $batch) {
+            $params = [
+                'wstoken'            => $this->token,
+                'wsfunction'         => 'core_user_get_users_by_field',
+                'moodlewsrestformat' => 'json',
+                'field'              => 'id',
+            ];
+            foreach ($batch as $i => $id) {
+                $params["values[$i]"] = $id;
+            }
+
+            $url  = $this->baseUrl . '/webservice/rest/server.php?' . http_build_query($params);
+            $data = $this->get($url);
+
+            // Fehler beim Nachladen ignorieren – E-Mail bleibt dann leer
+            if (isset($data['exception'])) {
+                break;
+            }
+
+            foreach ($data as $user) {
+                if (!empty($user['email'])) {
+                    $emails[(int) $user['id']] = $user['email'];
+                }
+            }
+        }
+
+        return $emails;
     }
 
     private function get(string $url): array
