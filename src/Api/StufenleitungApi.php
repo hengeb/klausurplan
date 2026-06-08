@@ -198,17 +198,51 @@ class StufenleitungApi
     }
 
     // ------------------------------------------------------------------
-    // Zusätzliche Prüflinge (Gastschüler*innen, nicht in GoMST)
+    // Prüflinge eines Kurses (GoMST + manuell hinzugefügte)
     // ------------------------------------------------------------------
 
     /**
-     * Fügt eine Person manuell als Prüfling einem Kurs hinzu.
-     * Der Kurs wird anhand der Klausur-ID ermittelt.
+     * Alle Prüflinge eines Kurses – aus GoMST und manuell hinzugefügte.
+     * Liefert aufgelöste Namen wenn schueler_id gesetzt ist.
      *
-     * Body: { name: string }  — Freitext-Name, z.B. "Mustermann, Max (Gastschule)"
+     * @return array<array{id: int, name_roh: string, kursart: string|null, schueler_id: int|null, vorname: string|null, nachname: string|null, ist_zusatz: int}>
+     */
+    public static function getKursSchueler(int $kursId): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('SELECT id FROM kurse WHERE id = ?');
+        $stmt->execute([$kursId]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Kurs $kursId nicht gefunden.");
+        }
+
+        $stmt = $db->prepare(
+            "SELECT ks.id,
+                    ks.name_roh,
+                    ks.kursart,
+                    ks.schueler_id,
+                    b.vorname,
+                    b.nachname,
+                    (ks.name_roh NOT LIKE '%|%') AS ist_zusatz
+             FROM kurs_schueler ks
+             LEFT JOIN benutzer b ON b.id = ks.schueler_id
+             WHERE ks.kurs_id = ?
+             ORDER BY ks.name_roh"
+        );
+        $stmt->execute([$kursId]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Fügt eine Person manuell einem Kurs hinzu.
+     *
+     * Body: { name: string }
      * @return array{kurs_schueler_id: int, name_roh: string}
      */
-    public static function addZusatzSchueler(int $klausurId, array $body): array
+    public static function addZusatzSchuelerZuKurs(int $kursId, array $body): array
     {
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
@@ -223,17 +257,13 @@ class StufenleitungApi
             throw new RuntimeException('Name zu lang (max. 200 Zeichen).');
         }
 
-        // Kurs der Klausur ermitteln
-        $stmt = $db->prepare('SELECT kurs_id FROM klausuren WHERE id = ?');
-        $stmt->execute([$klausurId]);
-        $row = $stmt->fetch();
-        if ($row === false) {
+        $stmt = $db->prepare('SELECT id FROM kurse WHERE id = ?');
+        $stmt->execute([$kursId]);
+        if ($stmt->fetchColumn() === false) {
             http_response_code(404);
-            throw new RuntimeException("Klausur $klausurId nicht gefunden.");
+            throw new RuntimeException("Kurs $kursId nicht gefunden.");
         }
-        $kursId = (int) $row['kurs_id'];
 
-        // Duplikat prüfen
         $dup = $db->prepare('SELECT id FROM kurs_schueler WHERE kurs_id = ? AND name_roh = ?');
         $dup->execute([$kursId, $name]);
         if ($dup->fetchColumn() !== false) {
@@ -248,54 +278,23 @@ class StufenleitungApi
         return ['kurs_schueler_id' => (int) $db->lastInsertId(), 'name_roh' => $name];
     }
 
-    // ------------------------------------------------------------------
-    // Zusatzschüler*innen abrufen und löschen
-    // ------------------------------------------------------------------
-
     /**
-     * Liefert alle manuell hinzugefügten Prüflinge (ohne '|' im name_roh).
-     * @return array<array{id: int, name_roh: string}>
+     * Löscht einen manuell hinzugefügten Prüfling aus einem Kurs.
+     * Schlägt fehl wenn der Eintrag GoMST-Format hat (enthält '|') oder nicht zum Kurs gehört.
      */
-    public static function getZusatzSchueler(int $klausurId): array
-    {
-        Session::requireRolle('admin', 'stufenleitung');
-        $db = Database::getInstance();
-
-        $stmt = $db->prepare('SELECT kurs_id FROM klausuren WHERE id = ?');
-        $stmt->execute([$klausurId]);
-        $row = $stmt->fetch();
-        if ($row === false) {
-            http_response_code(404);
-            throw new RuntimeException("Klausur $klausurId nicht gefunden.");
-        }
-
-        $stmt = $db->prepare(
-            "SELECT id, name_roh FROM kurs_schueler
-             WHERE kurs_id = ? AND name_roh NOT LIKE '%|%'
-             ORDER BY name_roh"
-        );
-        $stmt->execute([(int) $row['kurs_id']]);
-        return $stmt->fetchAll();
-    }
-
-    /**
-     * Löscht einen manuell hinzugefügten Prüfling.
-     * Schlägt fehl wenn der Eintrag GoMST-Format hat oder nicht zur Klausur gehört.
-     */
-    public static function deleteZusatzSchueler(int $klausurId, int $ksId): array
+    public static function deleteZusatzSchuelerAusKurs(int $kursId, int $ksId): array
     {
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
         $stmt = $db->prepare(
-            "SELECT ks.id FROM kurs_schueler ks
-             JOIN klausuren kl ON kl.kurs_id = ks.kurs_id
-             WHERE kl.id = ? AND ks.id = ? AND ks.name_roh NOT LIKE '%|%'"
+            "SELECT id FROM kurs_schueler
+             WHERE id = ? AND kurs_id = ? AND name_roh NOT LIKE '%|%'"
         );
-        $stmt->execute([$klausurId, $ksId]);
+        $stmt->execute([$ksId, $kursId]);
         if ($stmt->fetchColumn() === false) {
             http_response_code(404);
-            throw new RuntimeException('Zusatzschüler*in nicht gefunden oder gehört nicht zu dieser Klausur.');
+            throw new RuntimeException('Zusatzschüler*in nicht gefunden oder gehört nicht zu diesem Kurs.');
         }
 
         $db->prepare('DELETE FROM kurs_schueler WHERE id = ?')->execute([$ksId]);

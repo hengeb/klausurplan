@@ -215,18 +215,18 @@ $router->post('/anwesenheit/{klausur_id}', function (array $p): array {
 }, 'admin', 'stufenleitung', 'lehrkraft');
 
 // ------------------------------------------------------------------
-// Stufenleitung – Zusätzliche Prüflinge (Gastschüler*innen)
+// Stufenleitung – Prüflinge eines Kurses (GoMST + manuell)
 // ------------------------------------------------------------------
-$router->get('/stufenleitung/klausuren/{klausur_id}/zusatz-schueler', function (array $p): array {
-    return StufenleitungApi::getZusatzSchueler((int) $p['klausur_id']);
+$router->get('/stufenleitung/kurse/{kurs_id}/schueler', function (array $p): array {
+    return StufenleitungApi::getKursSchueler((int) $p['kurs_id']);
 }, 'admin', 'stufenleitung');
 
-$router->post('/stufenleitung/klausuren/{klausur_id}/zusatz-schueler', function (array $p): array {
-    return StufenleitungApi::addZusatzSchueler((int) $p['klausur_id'], Router::jsonBody());
+$router->post('/stufenleitung/kurse/{kurs_id}/zusatz-schueler', function (array $p): array {
+    return StufenleitungApi::addZusatzSchuelerZuKurs((int) $p['kurs_id'], Router::jsonBody());
 }, 'admin', 'stufenleitung');
 
-$router->delete('/stufenleitung/klausuren/{klausur_id}/zusatz-schueler/{ks_id}', function (array $p): array {
-    return StufenleitungApi::deleteZusatzSchueler((int) $p['klausur_id'], (int) $p['ks_id']);
+$router->delete('/stufenleitung/kurse/{kurs_id}/zusatz-schueler/{ks_id}', function (array $p): array {
+    return StufenleitungApi::deleteZusatzSchuelerAusKurs((int) $p['kurs_id'], (int) $p['ks_id']);
 }, 'admin', 'stufenleitung');
 
 // ------------------------------------------------------------------

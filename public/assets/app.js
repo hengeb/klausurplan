@@ -52,11 +52,21 @@ const VIEWS = {
 window.addEventListener('hashchange', render);
 
 function render() {
+    const app = document.getElementById('app');
+
+    // Reine Schüler*innen sehen immer direkt die Klausurliste
+    if (hatRolle('schueler') && !hatRolle('admin', 'stufenleitung', 'lehrkraft')) {
+        app.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+        viewSchueler(app).catch(err => {
+            app.innerHTML = `<p class="fehler">Fehler: ${err.message}</p>`;
+        });
+        return;
+    }
+
     const hash = location.hash.replace('#', '') || 'start';
     const view = VIEWS[hash] ?? viewStart;
 
     renderNav();
-    const app = document.getElementById('app');
     app.innerHTML = '<p class="lade-text">Wird geladen…</p>';
     view(app).catch(err => {
         app.innerHTML = `<p class="fehler">Fehler: ${err.message}</p>`;
@@ -519,12 +529,10 @@ async function viewHalbjahre(el) {
                                     <button class="btn btn-klein btn-kurs-laden" data-hj-id="${hj.id}">
                                         Kurse anzeigen
                                     </button>
-                                    <button class="btn btn-klein btn-gefahr btn-hj-loeschen"
+                                    <button class="btn-icon btn-icon-gefahr btn-hj-loeschen"
                                             data-hj-id="${hj.id}"
                                             data-hj-label="${escHtml(hj.stufe + ' – ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}"
-                                            title="Löschen">
-                                        🗑️
-                                    </button>
+                                            title="Löschen">🗑️</button>
                                 </div>
                             </div>
                             <div id="kurse-${hj.id}" class="kurs-liste versteckt"></div>
@@ -562,6 +570,11 @@ async function viewHalbjahre(el) {
                 ziel.innerHTML = renderKursTabelle(kurse);
                 ziel.classList.remove('versteckt');
                 btn.remove();
+                ziel.querySelectorAll('.btn-kurs-teilnehmer').forEach(tnBtn => {
+                    tnBtn.addEventListener('click', () =>
+                        zeigeKursTeilnehmerDialog(parseInt(tnBtn.dataset.kursId), tnBtn.dataset.kursName)
+                    );
+                });
             } catch (err) {
                 btn.disabled = false;
                 btn.textContent = 'Kurse anzeigen';
@@ -613,8 +626,12 @@ function renderKursTabelle(kurse) {
             <td>${escHtml(k.kursart)}</td>
             <td>${lehrkraft}</td>
             <td>
-                <span class="ampel ampel-${ampel}"></span>
-                ${k.schueler_zugeordnet}/${k.schueler_gesamt}
+                <button class="link-btn btn-kurs-teilnehmer"
+                        data-kurs-id="${k.id}"
+                        data-kurs-name="${escHtml(k.anzeigename)}"
+                        title="Teilnehmendenliste öffnen">
+                    <span class="ampel ampel-${ampel}"></span>${k.schueler_zugeordnet}/${k.schueler_gesamt}
+                </button>
             </td>
         </tr>`;
     }).join('');
@@ -631,6 +648,170 @@ function renderKursTabelle(kurse) {
             </thead>
             <tbody>${zeilen}</tbody>
         </table>`;
+}
+
+// ---------------------------------------------------------------------------
+// Dialog: Teilnehmendenliste eines Kurses
+// ---------------------------------------------------------------------------
+
+async function zeigeKursTeilnehmerDialog(kursId, kursName) {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+        <div class="dialog" style="max-width:560px">
+            <h3>Teilnehmende</h3>
+            <p class="dialog-kursname">${escHtml(kursName)}</p>
+            <div id="tn-inhalt"><p class="lade-text">Wird geladen…</p></div>
+            ${hatRolle('admin', 'stufenleitung') ? `
+            <div style="margin-top:1rem;border-top:1px solid #e5e7eb;padding-top:.75rem">
+                <p style="font-size:.8rem;font-weight:600;margin:0 0 .4rem">Zusätzliche Prüflinge hinzufügen</p>
+                <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                    <input type="text" id="tn-zusatz-name"
+                           placeholder="Name – mehrere Zeilen mit Strg+V möglich"
+                           style="flex:1;min-width:180px;padding:.3rem .5rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
+                    <button class="btn btn-klein" id="tn-zusatz-btn">Hinzufügen</button>
+                </div>
+                <p id="tn-zusatz-info" style="font-size:.8rem;margin:.4rem 0 0;color:#555"></p>
+            </div>` : ''}
+            <div class="dialog-aktionen" style="margin-top:.75rem">
+                <button class="btn btn-sekundaer" id="tn-schliessen">Schließen</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#tn-schliessen').addEventListener('click', () => overlay.remove());
+    schliessbar(overlay);
+
+    async function ladeTeilnehmer() {
+        const inhaltEl = overlay.querySelector('#tn-inhalt');
+        inhaltEl.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+        try {
+            const eintraege = await apiFetch(`/stufenleitung/kurse/${kursId}/schueler`);
+            renderTeilnehmerListe(inhaltEl, eintraege);
+        } catch (err) {
+            inhaltEl.innerHTML = `<p class="fehler">${escHtml(err.message)}</p>`;
+        }
+    }
+
+    function renderTeilnehmerListe(el, eintraege) {
+        if (eintraege.length === 0) {
+            el.innerHTML = '<p class="hinweis">Keine Prüflinge in diesem Kurs.</p>';
+            return;
+        }
+
+        const zeilen = eintraege.map(e => {
+            let name;
+            if (e.nachname) {
+                name = `${escHtml(e.nachname)}, ${escHtml(e.vorname ?? '')}`;
+            } else if (e.name_roh.includes('|')) {
+                const [n, v] = e.name_roh.split('|');
+                name = `${escHtml(n)}, ${escHtml(v ?? '')}`;
+            } else {
+                name = escHtml(e.name_roh);
+            }
+
+            const kursart = e.kursart ? escHtml(e.kursart) : '<span class="fehlend">–</span>';
+            const istZusatz = e.ist_zusatz == 1;
+            const loeschBtn = (hatRolle('admin', 'stufenleitung') && istZusatz)
+                ? `<button class="btn-icon btn-icon-gefahr btn-tn-loeschen" data-ks-id="${e.id}" title="Löschen">🗑️</button>`
+                : '';
+
+            return `<tr>
+                <td>${name}</td>
+                <td>${kursart}</td>
+                <td>${loeschBtn}</td>
+            </tr>`;
+        }).join('');
+
+        el.innerHTML = `
+            <div class="tabelle-wrapper">
+                <table class="data-tabelle">
+                    <thead><tr><th>Name</th><th>Kursart</th><th></th></tr></thead>
+                    <tbody>${zeilen}</tbody>
+                </table>
+            </div>`;
+
+        if (hatRolle('admin', 'stufenleitung')) {
+            el.querySelectorAll('.btn-tn-loeschen').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const ksId = parseInt(btn.dataset.ksId);
+                    const name = btn.closest('tr').querySelector('td').textContent;
+                    if (!confirm(`„${name}" wirklich entfernen?`)) return;
+                    btn.disabled = true;
+                    try {
+                        await apiFetch(`/stufenleitung/kurse/${kursId}/zusatz-schueler/${ksId}`, { method: 'DELETE' });
+                        await ladeTeilnehmer();
+                    } catch (err) {
+                        alert(err.message);
+                        btn.disabled = false;
+                    }
+                });
+            });
+        }
+    }
+
+    if (hatRolle('admin', 'stufenleitung')) {
+        const input  = overlay.querySelector('#tn-zusatz-name');
+        const infoEl = overlay.querySelector('#tn-zusatz-info');
+
+        async function addZusatz(name) {
+            await apiFetch(`/stufenleitung/kurse/${kursId}/zusatz-schueler`, {
+                method: 'POST',
+                body: JSON.stringify({ name }),
+            });
+        }
+
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                overlay.querySelector('#tn-zusatz-btn').click();
+            }
+        });
+
+        overlay.querySelector('#tn-zusatz-btn').addEventListener('click', async () => {
+            const name = input.value.trim();
+            if (!name) return;
+            try {
+                await addZusatz(name);
+                infoEl.style.color = '#27ae60';
+                infoEl.textContent = `✓ „${name}" hinzugefügt.`;
+                input.value = '';
+                await ladeTeilnehmer();
+            } catch (err) {
+                infoEl.style.color = '#c0392b';
+                infoEl.textContent = err.message;
+            }
+        });
+
+        input.addEventListener('paste', async e => {
+            const text = (e.clipboardData ?? window.clipboardData)?.getData('text') ?? '';
+            if (!text.includes('\n')) return;
+            e.preventDefault();
+            const namen = text.split('\n').map(n => n.trim()).filter(n => n !== '');
+            if (namen.length === 0) return;
+
+            infoEl.style.color = '#555';
+            infoEl.textContent = `Füge ${namen.length} Einträge hinzu…`;
+            input.value = '';
+
+            let hinzugefuegt = 0;
+            const fehler = [];
+            for (const name of namen) {
+                try { await addZusatz(name); hinzugefuegt++; }
+                catch (err) { fehler.push(`„${name}": ${err.message}`); }
+            }
+
+            if (fehler.length === 0) {
+                infoEl.style.color = '#27ae60';
+                infoEl.textContent = `✓ ${hinzugefuegt} Einträge hinzugefügt.`;
+            } else {
+                infoEl.style.color = '#c0392b';
+                infoEl.textContent = `${hinzugefuegt} hinzugefügt, ${fehler.length} Fehler: ${fehler[0]}`;
+            }
+            await ladeTeilnehmer();
+        });
+    }
+
+    await ladeTeilnehmer();
 }
 
 // ---------------------------------------------------------------------------
@@ -818,11 +999,11 @@ function renderKlausurZeile(k) {
 
     const aktionen = [];
     if (hatRolle('admin', 'stufenleitung')) {
-        aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-klausur-bearbeiten" data-id="${k.id}" title="Bearbeiten">✏️</button>`);
+        aktionen.push(`<button class="btn-icon btn-klausur-bearbeiten" data-id="${k.id}" title="Bearbeiten">✏️</button>`);
         if (k.lehrer_id) {
-            aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-email-ausloesen" data-id="${k.id}" title="Anwesenheits-E-Mail senden">E-Mail</button>`);
+            aktionen.push(`<button class="btn-icon btn-email-ausloesen" data-id="${k.id}" title="Anwesenheits-E-Mail senden">✉️</button>`);
         }
-        aktionen.push(`<button class="btn btn-klein btn-gefahr btn-klausur-loeschen" data-id="${k.id}" data-name="${escHtml(k.kurs_anzeigename)}" title="Löschen">🗑️</button>`);
+        aktionen.push(`<button class="btn-icon btn-icon-gefahr btn-klausur-loeschen" data-id="${k.id}" data-name="${escHtml(k.kurs_anzeigename)}" title="Löschen">🗑️</button>`);
     }
     aktionen.push(`<button class="btn btn-klein btn-anwesenheit" data-id="${k.id}">Anwesenheit</button>`);
 
@@ -869,131 +1050,12 @@ function zeigeKlausurBearbeitenDialog(k, nachSpeichern) {
                 <button class="btn btn-sekundaer" id="dlg-abbrechen">Abbrechen</button>
             </div>
             <p id="dlg-fehler" class="fehler" style="display:none"></p>
-            ${hatRolle('admin', 'stufenleitung') ? `
-            <details id="dlg-zusatz-details" style="margin-top:1rem">
-                <summary style="cursor:pointer;font-size:.875rem;color:#555">Zusätzliche Prüflinge (nicht in GoMST)</summary>
-                <div id="dlg-zusatz-liste" style="margin-top:.5rem;margin-bottom:.4rem"></div>
-                <div style="margin-top:.4rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-                    <input type="text" id="dlg-zusatz-name"
-                           placeholder="Name – mehrere Zeilen mit Strg+V einfügen möglich"
-                           style="flex:1;min-width:180px;padding:.3rem .5rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
-                    <button class="btn btn-klein btn-sekundaer" id="dlg-zusatz-btn">Hinzufügen</button>
-                </div>
-                <p id="dlg-zusatz-info" style="font-size:.8rem;margin:.4rem 0 0;color:#555"></p>
-            </details>` : ''}
         </div>
     `;
     document.body.appendChild(overlay);
 
     overlay.querySelector('#dlg-abbrechen').addEventListener('click', () => overlay.remove());
     schliessbar(overlay);
-
-    if (hatRolle('admin', 'stufenleitung')) {
-        const input  = overlay.querySelector('#dlg-zusatz-name');
-        const infoEl = overlay.querySelector('#dlg-zusatz-info');
-
-        async function ladezusatzListe() {
-            const listeEl = overlay.querySelector('#dlg-zusatz-liste');
-            try {
-                const eintraege = await apiFetch(`/stufenleitung/klausuren/${k.id}/zusatz-schueler`);
-                if (eintraege.length === 0) {
-                    listeEl.innerHTML = '<p style="font-size:.8rem;color:#888;margin:.2rem 0">Keine zusätzlichen Prüflinge.</p>';
-                } else {
-                    listeEl.innerHTML = eintraege.map(e =>
-                        `<div class="zusatz-zeile" data-ks-id="${e.id}"
-                              style="display:flex;align-items:center;gap:.4rem;margin-bottom:.25rem">
-                            <span style="font-size:.875rem">${escHtml(e.name_roh)}</span>
-                            <button class="btn btn-klein btn-gefahr btn-zusatz-loeschen" title="Löschen">🗑️</button>
-                        </div>`
-                    ).join('');
-
-                    listeEl.querySelectorAll('.btn-zusatz-loeschen').forEach(btn => {
-                        btn.addEventListener('click', async () => {
-                            const zeile = btn.closest('.zusatz-zeile');
-                            const name  = zeile.querySelector('span').textContent;
-                            const ksId  = zeile.dataset.ksId;
-                            if (!confirm(`„${name}" wirklich entfernen?`)) return;
-                            btn.disabled = true;
-                            try {
-                                await apiFetch(
-                                    `/stufenleitung/klausuren/${k.id}/zusatz-schueler/${ksId}`,
-                                    { method: 'DELETE' }
-                                );
-                                await ladezusatzListe();
-                            } catch (err) {
-                                alert(err.message);
-                                btn.disabled = false;
-                            }
-                        });
-                    });
-                }
-            } catch (err) {
-                overlay.querySelector('#dlg-zusatz-liste').innerHTML =
-                    `<p class="fehler" style="font-size:.8rem;margin:0">${escHtml(err.message)}</p>`;
-            }
-        }
-
-        async function addZusatz(name) {
-            await apiFetch(`/stufenleitung/klausuren/${k.id}/zusatz-schueler`, {
-                method: 'POST',
-                body: JSON.stringify({ name }),
-            });
-        }
-
-        // Liste laden wenn Details-Element geöffnet wird
-        overlay.querySelector('#dlg-zusatz-details').addEventListener('toggle', e => {
-            if (e.target.open) ladezusatzListe();
-        });
-
-        // Einzeln hinzufügen
-        overlay.querySelector('#dlg-zusatz-btn').addEventListener('click', async () => {
-            const name = input.value.trim();
-            if (!name) return;
-            try {
-                await addZusatz(name);
-                infoEl.style.color = '#27ae60';
-                infoEl.textContent = `✓ „${name}" hinzugefügt.`;
-                input.value = '';
-                await ladezusatzListe();
-            } catch (err) {
-                infoEl.style.color = '#c0392b';
-                infoEl.textContent = err.message;
-            }
-        });
-
-        // Mehrere auf einmal per Paste mit Zeilenumbrüchen
-        input.addEventListener('paste', async e => {
-            const text = (e.clipboardData ?? window.clipboardData)?.getData('text') ?? '';
-            if (!text.includes('\n')) return; // Einzeilig → normales Paste-Verhalten
-            e.preventDefault();
-            const namen = text.split('\n').map(n => n.trim()).filter(n => n !== '');
-            if (namen.length === 0) return;
-
-            infoEl.style.color = '#555';
-            infoEl.textContent = `Füge ${namen.length} Einträge hinzu…`;
-            input.value = '';
-
-            let hinzugefuegt = 0;
-            const fehler = [];
-            for (const name of namen) {
-                try {
-                    await addZusatz(name);
-                    hinzugefuegt++;
-                } catch (err) {
-                    fehler.push(`„${name}": ${err.message}`);
-                }
-            }
-
-            if (fehler.length === 0) {
-                infoEl.style.color = '#27ae60';
-                infoEl.textContent = `✓ ${hinzugefuegt} Einträge hinzugefügt.`;
-            } else {
-                infoEl.style.color = '#c0392b';
-                infoEl.textContent = `${hinzugefuegt} hinzugefügt, ${fehler.length} Fehler: ${fehler[0]}`;
-            }
-            await ladezusatzListe();
-        });
-    }
 
     overlay.querySelector('#dlg-speichern').addEventListener('click', async () => {
         const btn = overlay.querySelector('#dlg-speichern');
@@ -1512,9 +1574,9 @@ function renderNachschreibtermineList(el, termine) {
                     ${hatRolle('admin', 'stufenleitung', 'lehrkraft') ? `
                     <button class="btn btn-klein btn-sekundaer btn-nt-anwesenheit" data-id="${t.id}">Anwesenheit</button>` : ''}
                     ${hatRolle('admin', 'stufenleitung') ? `
-                    <button class="btn btn-klein btn-sekundaer btn-nt-bearbeiten" data-id="${t.id}" title="Bearbeiten">✏️</button>
-                    <button class="btn btn-klein btn-sekundaer btn-nt-klausuren" data-id="${t.id}">Klausuren verknüpfen</button>
-                    <button class="btn btn-klein btn-gefahr btn-nt-loeschen" data-id="${t.id}" title="Löschen">🗑️</button>` : ''}
+                    <button class="btn-icon btn-nt-bearbeiten" data-id="${t.id}" title="Bearbeiten">✏️</button>
+                    <button class="btn-icon btn-icon-gefahr btn-nt-loeschen" data-id="${t.id}" title="Löschen">🗑️</button>
+                    <button class="btn btn-klein btn-sekundaer btn-nt-klausuren" data-id="${t.id}">Klausuren verknüpfen</button>` : ''}
                 </div>
             </div>
             ${t.bemerkung ? `<p class="nt-bemerkung">${escHtml(t.bemerkung)}</p>` : ''}
@@ -1938,7 +2000,7 @@ async function ladeFaecherAbschnitt(el) {
             <td>
                 <button class="btn btn-klein btn-fach-speichern">Speichern</button>
                 <span class="fach-ok" style="display:none;color:#27ae60;font-size:.8rem;margin-left:.4rem">✓</span>
-                <button class="btn btn-klein btn-gefahr btn-fach-loeschen" style="margin-left:.25rem" title="Löschen">🗑️</button>
+                <button class="btn-icon btn-icon-gefahr btn-fach-loeschen" style="margin-left:.25rem" title="Löschen">🗑️</button>
             </td>
         </tr>`).join('');
 
@@ -2061,7 +2123,7 @@ async function viewSchueler(el) {
         el.innerHTML = `
             <h2>Meine Klausuren</h2>
             <div class="karte">
-                <p>Es wurden noch keine Klausurtermine für Sie eingetragen.</p>
+                <p>Es wurden noch keine Klausurtermine für dich eingetragen.</p>
             </div>`;
         return;
     }
@@ -2260,7 +2322,7 @@ async function ladeBenutzerAbschnitt(el) {
             <td>${escHtml(b.nachname)}, ${escHtml(b.vorname)}</td>
             <td class="td-rollen">${badges}</td>
             <td>
-                <button class="btn btn-klein btn-sekundaer btn-rollen-bearbeiten"
+                <button class="btn-icon btn-rollen-bearbeiten"
                         data-id="${b.id}" title="Rollen bearbeiten">✏️</button>
             </td>
         </tr>`;

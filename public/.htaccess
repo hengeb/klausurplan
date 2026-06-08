@@ -9,6 +9,11 @@ RewriteRule ^ - [L]
 # /api/* → api.php (REQUEST_URI bleibt erhalten, Router liest ihn aus)
 RewriteRule ^api(/.*)?$ api.php [L,QSA]
 
+# PHP-Einstiegspunkte ohne .php-Extension
+RewriteRule ^setup$      setup.php      [L,QSA]
+RewriteRule ^lti-launch$ lti-launch.php [L,QSA]
+RewriteRule ^lti-jwks$   lti-jwks.php   [L,QSA]
+
 # Alle anderen Anfragen → index.php
 RewriteRule ^ index.php [L]
 

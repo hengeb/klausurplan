@@ -148,6 +148,42 @@ main {
     font-size: 0.8125rem;
 }
 
+/* Link-Buttons: sehen aus wie Text-Links, verhalten sich aber wie Buttons */
+.link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: #2066a8;
+    text-decoration: underline;
+    font-size: inherit;
+    font-family: inherit;
+    line-height: inherit;
+}
+.link-btn:hover { color: #1550a0; }
+
+/* Icon-only-Buttons: transparenter Hintergrund, dezentes Hover */
+.btn-icon {
+    background: transparent;
+    border: 1px solid transparent;
+    padding: .15rem .3rem;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    transition: background .15s, border-color .15s;
+    color: inherit;
+    vertical-align: middle;
+}
+.btn-icon:hover:not(:disabled) {
+    background: #e8edf2;
+    border-color: #c8cdd5;
+}
+.btn-icon-gefahr:hover:not(:disabled) {
+    background: #fdf0ee;
+    border-color: #e8a0a0;
+}
+
 /* ---------------------------------------------------------------------------
    Formulare
 --------------------------------------------------------------------------- */
