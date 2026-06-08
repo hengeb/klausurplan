@@ -72,14 +72,16 @@ class StufenleitungApi
              ORDER BY ks.name_roh"
         )->fetchAll();
 
-        // Moodle-Nutzer*innen ohne Schüler*innen-Zuordnung (kein Kürzel → kein Lehrer)
+        // Moodle-Nutzer*innen ohne Schüler*innen-Zuordnung, die keine Lehrkraft-Rolle haben
         $schuelerMoodle = $db->query(
             "SELECT b.id, b.vorname, b.nachname, b.stufe
              FROM benutzer b
-             WHERE b.kuerzel IS NULL
+             WHERE NOT EXISTS (
+                     SELECT 1 FROM kurs_schueler ks WHERE ks.schueler_id = b.id
+                   )
                AND NOT EXISTS (
-                   SELECT 1 FROM kurs_schueler ks WHERE ks.schueler_id = b.id
-               )
+                     SELECT 1 FROM rollen r WHERE r.benutzer_id = b.id AND r.rolle = 'lehrkraft'
+                   )
              ORDER BY b.nachname, b.vorname"
         )->fetchAll();
 
@@ -94,14 +96,16 @@ class StufenleitungApi
              ORDER BY k.lehrer_kuerzel"
         )->fetchAll();
 
-        // Moodle-Lehrkräfte ohne Kurszuordnung
+        // Moodle-Lehrkräfte ohne Kurszuordnung (Rolle 'lehrkraft', egal ob Kürzel vorhanden)
         $lehrkraefteMoodle = $db->query(
             "SELECT b.id, b.vorname, b.nachname, b.kuerzel
              FROM benutzer b
-             WHERE b.kuerzel IS NOT NULL
+             WHERE EXISTS (
+                     SELECT 1 FROM rollen r WHERE r.benutzer_id = b.id AND r.rolle = 'lehrkraft'
+                   )
                AND NOT EXISTS (
-                   SELECT 1 FROM kurse k WHERE k.lehrer_id = b.id
-               )
+                     SELECT 1 FROM kurse k WHERE k.lehrer_id = b.id
+                   )
              ORDER BY b.nachname, b.vorname"
         )->fetchAll();
 
