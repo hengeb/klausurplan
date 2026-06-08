@@ -33,6 +33,7 @@ const VIEWS = {
     halbjahre:           viewHalbjahre,
     klausuren:           viewKlausuren,
     nachschreibtermine:  viewNachschreibtermine,
+    admin:               viewAdmin,
 };
 
 function navigate(hash) {
@@ -74,6 +75,10 @@ function renderNav() {
         );
     }
 
+    if (hatRolle('admin')) {
+        links.push({ hash: 'admin', label: 'Administration' });
+    }
+
     const aktiv = location.hash.replace('#', '') || 'start';
     nav.innerHTML = links.map(l =>
         `<a href="#${l.hash}" class="${l.hash === aktiv ? 'aktiv' : ''}">${l.label}</a>`
@@ -113,6 +118,11 @@ async function viewStart(el) {
             <a href="#halbjahre" class="kachel">
                 <span class="kachel-icon">📋</span>
                 <span>Halbjahre & Kurse</span>
+            </a>` : ''}
+            ${hatRolle('admin') ? `
+            <a href="#admin" class="kachel">
+                <span class="kachel-icon">⚙️</span>
+                <span>Administration</span>
             </a>` : ''}
         </div>
     `;
@@ -393,9 +403,16 @@ function renderLehrkraefte(lKurse, lMoodle) {
         return '<div class="karte"><p class="ok-text">✓ Alle Lehrkräfte sind zugeordnet.</p></div>';
     }
 
-    const moodleOptionen = lMoodle.map(l =>
-        `<option value="${l.id}">${l.nachname}, ${l.vorname} (${l.kuerzel})</option>`
-    ).join('');
+    const moodleOptionen = lMoodle.map(l => {
+        // Moodle speichert z.B. "Gebauer (GB)" als Nachname; Kürzel daher aus Nachname entfernen
+        const nachname = l.kuerzel
+            ? l.nachname.replace(/\s*\([^)]+\)$/, '')
+            : l.nachname;
+        const anzeige = l.kuerzel
+            ? `${nachname}, ${l.vorname} (${l.kuerzel})`
+            : `${nachname}, ${l.vorname}`;
+        return `<option value="${l.id}">${anzeige}</option>`;
+    }).join('');
 
     const zeilen = lKurse.map(k => {
         const kuerzelAttr = escHtml(k.lehrer_kuerzel);
@@ -1579,6 +1596,55 @@ function escHtml(str) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+// ---------------------------------------------------------------------------
+// View: Administration (nur Admin)
+// ---------------------------------------------------------------------------
+
+async function viewAdmin(el) {
+    if (!hatRolle('admin')) {
+        el.innerHTML = '<p class="fehler">Kein Zugriff.</p>';
+        return;
+    }
+
+    el.innerHTML = `
+        <h2>Administration</h2>
+        <div class="karte">
+            <h3>Moodle-Nutzer synchronisieren</h3>
+            <p>
+                Liest alle aktiven Nutzer*innen aus Moodle und aktualisiert
+                die lokale Benutzertabelle (Namen, E-Mail-Adressen, Kürzel).
+                Bereits zugewiesene Rollen werden nicht verändert.
+            </p>
+            <button id="sync-btn" class="btn">Jetzt synchronisieren</button>
+            <div id="sync-ergebnis" style="margin-top: 1rem;"></div>
+        </div>
+    `;
+
+    el.querySelector('#sync-btn').addEventListener('click', async () => {
+        const btn      = el.querySelector('#sync-btn');
+        const ergebnis = el.querySelector('#sync-ergebnis');
+        btn.disabled   = true;
+        btn.textContent = 'Synchronisiere…';
+        ergebnis.innerHTML = '';
+
+        try {
+            const res = await apiFetch('/admin/moodle-sync', { method: 'POST' });
+            ergebnis.innerHTML = `
+                <div class="hinweis-box hinweis-ok">
+                    Synchronisation abgeschlossen:
+                    <strong>${res.neu}</strong> neue Nutzer*innen,
+                    <strong>${res.aktualisiert}</strong> aktualisiert,
+                    <strong>${res.gesamt}</strong> gesamt verarbeitet.
+                </div>`;
+        } catch (err) {
+            ergebnis.innerHTML = `<p class="fehler">Fehler: ${escHtml(err.message)}</p>`;
+        } finally {
+            btn.disabled    = false;
+            btn.textContent = 'Jetzt synchronisieren';
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------

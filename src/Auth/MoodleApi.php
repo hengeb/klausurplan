@@ -188,7 +188,7 @@ class MoodleApi
     public static function extraktKuerzel(string $nachname): ?string
     {
         if (preg_match('/\(([A-ZÄÖÜa-zäöü]{1,10})\)$/', trim($nachname), $treffer)) {
-            return strtoupper($treffer[1]);
+            return $treffer[1];
         }
 
         return null;
