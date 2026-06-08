@@ -172,6 +172,122 @@ class AnwesenheitApi
     }
 
     // ------------------------------------------------------------------
+    // Nachschreibtermin-Anwesenheit
+    // ------------------------------------------------------------------
+
+    /**
+     * Gibt alle Nachschreiber eines Termins mit ihrem Anwesenheitsstatus zurück.
+     * Nachschreiber = fehlend + entschuldigt/offen, verknüpft via nachschreib_zuordnungen.
+     */
+    public static function getNachschreibAnwesenheit(int $ntId): array
+    {
+        Session::requireRolle('admin', 'stufenleitung', 'lehrkraft');
+        $db = Database::getInstance();
+
+        self::pruefeNachschreibZugriff($db, $ntId);
+
+        $stmt = $db->prepare(
+            "SELECT ks.id                               AS kurs_schueler_id,
+                    ks.name_roh,
+                    b.vorname,
+                    b.nachname,
+                    k.anzeigename                        AS kurs_anzeigename,
+                    na.id                                AS anwesenheit_id,
+                    COALESCE(na.status, 'ausstehend')    AS status,
+                    na.entschuldigt,
+                    na.kommentar
+             FROM nachschreib_zuordnungen nz
+             JOIN klausuren kl ON kl.id = nz.klausur_id
+             JOIN kurse k      ON k.id  = kl.kurs_id
+             JOIN anwesenheiten a ON a.klausur_id = kl.id
+             JOIN kurs_schueler ks ON ks.id = a.kurs_schueler_id
+             LEFT JOIN benutzer b  ON b.id = ks.schueler_id
+             LEFT JOIN nachschreib_anwesenheiten na
+                    ON na.nachschreibtermin_id = ? AND na.kurs_schueler_id = ks.id
+             WHERE nz.nachschreibtermin_id = ?
+               AND a.status = 'fehlend'
+               AND (a.entschuldigt IS NULL OR a.entschuldigt = 1)
+             ORDER BY COALESCE(b.nachname, ks.name_roh), b.vorname"
+        );
+        $stmt->execute([$ntId, $ntId]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Trägt Anwesenheiten für einen Nachschreibtermin ein (Bulk-Upsert).
+     */
+    public static function postNachschreibAnwesenheit(int $ntId, array $eintraege): array
+    {
+        Session::requireRolle('admin', 'stufenleitung', 'lehrkraft');
+        $db = Database::getInstance();
+
+        self::pruefeNachschreibZugriff($db, $ntId);
+
+        $benutzer  = Session::getBenutzer();
+        $rollen    = $benutzer['rollen'] ?? [];
+        $kannEntschuldigen = in_array('admin', $rollen, true)
+                          || in_array('stufenleitung', $rollen, true);
+
+        $gespeichert    = 0;
+        $erlaubteStatus = ['anwesend', 'fehlend', 'ausstehend'];
+
+        foreach ($eintraege as $e) {
+            $ksId      = (int) ($e['kurs_schueler_id'] ?? 0);
+            $status    = $e['status'] ?? 'ausstehend';
+            $kommentar = ($e['kommentar'] ?? '') !== '' ? trim($e['kommentar']) : null;
+
+            if ($ksId === 0 || !in_array($status, $erlaubteStatus, true)) {
+                continue;
+            }
+
+            $vorhandene = $db->prepare(
+                'SELECT id FROM nachschreib_anwesenheiten WHERE nachschreibtermin_id = ? AND kurs_schueler_id = ?'
+            );
+            $vorhandene->execute([$ntId, $ksId]);
+            $aid = $vorhandene->fetchColumn();
+
+            if ($aid !== false) {
+                $db->prepare(
+                    'UPDATE nachschreib_anwesenheiten SET status = ?, kommentar = ?, erfasst_von = ?, erfasst_am = NOW() WHERE id = ?'
+                )->execute([$status, $kommentar, $benutzer['id'], $aid]);
+            } else {
+                $db->prepare(
+                    'INSERT INTO nachschreib_anwesenheiten (nachschreibtermin_id, kurs_schueler_id, status, kommentar, erfasst_von, erfasst_am)
+                     VALUES (?, ?, ?, ?, ?, NOW())'
+                )->execute([$ntId, $ksId, $status, $kommentar, $benutzer['id']]);
+            }
+            $gespeichert++;
+        }
+
+        return ['gespeichert' => $gespeichert];
+    }
+
+    /** Prüft ob die Lehrkraft Zugriff auf diesen Nachschreibtermin hat. */
+    private static function pruefeNachschreibZugriff(\PDO $db, int $ntId): void
+    {
+        $benutzer = Session::getBenutzer();
+        $rollen   = $benutzer['rollen'] ?? [];
+
+        if (in_array('admin', $rollen, true) || in_array('stufenleitung', $rollen, true)) {
+            return;
+        }
+
+        // Lehrkraft: nur wenn mindestens eine verknüpfte Klausur ihr gehört
+        $stmt = $db->prepare(
+            'SELECT 1 FROM nachschreib_zuordnungen nz
+             JOIN klausuren kl ON kl.id = nz.klausur_id
+             JOIN kurse k      ON k.id  = kl.kurs_id
+             WHERE nz.nachschreibtermin_id = ? AND k.lehrer_id = ?
+             LIMIT 1'
+        );
+        $stmt->execute([$ntId, $benutzer['id']]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(403);
+            throw new RuntimeException('Kein Zugriff auf diesen Nachschreibtermin.');
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Token-basierte Seiten (kein Login erforderlich)
     // ------------------------------------------------------------------
 

@@ -285,13 +285,21 @@ class GomstImporter
 
         foreach ($stmt->fetchAll() as $ks) {
             [$nachname, $vorname] = array_pad(explode('|', $ks['name_roh'], 2), 2, '');
+            $nachname = trim($nachname);
+            $vorname  = trim($vorname);
+            // Erster Vorname (bis zum ersten Leerzeichen) für Teilübereinstimmung
+            $erstVorname = strtok($vorname, ' ');
 
+            // Exakte Übereinstimmung zuerst, dann Fallback auf ersten Vornamen
             $benutzer = $this->db->prepare(
                 'SELECT id FROM benutzer
                  WHERE LOWER(TRIM(nachname)) = LOWER(?)
-                   AND LOWER(TRIM(vorname))  = LOWER(?)'
+                   AND (LOWER(TRIM(vorname)) = LOWER(?)
+                        OR LOWER(TRIM(SUBSTRING_INDEX(vorname, \' \', 1))) = LOWER(?))
+                 ORDER BY CASE WHEN LOWER(TRIM(vorname)) = LOWER(?) THEN 0 ELSE 1 END
+                 LIMIT 1'
             );
-            $benutzer->execute([trim($nachname), trim($vorname)]);
+            $benutzer->execute([$nachname, $vorname, $erstVorname, $vorname]);
             $benutzerId = $benutzer->fetchColumn();
 
             if ($benutzerId !== false) {

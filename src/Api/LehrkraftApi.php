@@ -520,6 +520,42 @@ class LehrkraftApi
     }
 
     // ------------------------------------------------------------------
+    // Löschen
+    // ------------------------------------------------------------------
+
+    public static function deleteKlausur(int $id): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('SELECT id FROM klausuren WHERE id = ?');
+        $stmt->execute([$id]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Klausur $id nicht gefunden.");
+        }
+
+        $db->prepare('DELETE FROM klausuren WHERE id = ?')->execute([$id]);
+        return ['ok' => true];
+    }
+
+    public static function deleteNachschreibtermin(int $id): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('SELECT id FROM nachschreibtermine WHERE id = ?');
+        $stmt->execute([$id]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Nachschreibtermin $id nicht gefunden.");
+        }
+
+        $db->prepare('DELETE FROM nachschreibtermine WHERE id = ?')->execute([$id]);
+        return ['ok' => true];
+    }
+
+    // ------------------------------------------------------------------
     // Hilfsmethoden
     // ------------------------------------------------------------------
 

@@ -198,6 +198,57 @@ class StufenleitungApi
     }
 
     // ------------------------------------------------------------------
+    // Zusätzliche Prüflinge (Gastschüler*innen, nicht in GoMST)
+    // ------------------------------------------------------------------
+
+    /**
+     * Fügt eine Person manuell als Prüfling einem Kurs hinzu.
+     * Der Kurs wird anhand der Klausur-ID ermittelt.
+     *
+     * Body: { name: string }  — Freitext-Name, z.B. "Mustermann, Max (Gastschule)"
+     * @return array{kurs_schueler_id: int, name_roh: string}
+     */
+    public static function addZusatzSchueler(int $klausurId, array $body): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $name = trim($body['name'] ?? '');
+        if ($name === '') {
+            http_response_code(400);
+            throw new RuntimeException('Name darf nicht leer sein.');
+        }
+        if (strlen($name) > 200) {
+            http_response_code(400);
+            throw new RuntimeException('Name zu lang (max. 200 Zeichen).');
+        }
+
+        // Kurs der Klausur ermitteln
+        $stmt = $db->prepare('SELECT kurs_id FROM klausuren WHERE id = ?');
+        $stmt->execute([$klausurId]);
+        $row = $stmt->fetch();
+        if ($row === false) {
+            http_response_code(404);
+            throw new RuntimeException("Klausur $klausurId nicht gefunden.");
+        }
+        $kursId = (int) $row['kurs_id'];
+
+        // Duplikat prüfen
+        $dup = $db->prepare('SELECT id FROM kurs_schueler WHERE kurs_id = ? AND name_roh = ?');
+        $dup->execute([$kursId, $name]);
+        if ($dup->fetchColumn() !== false) {
+            http_response_code(409);
+            throw new RuntimeException('Eine Person mit diesem Namen ist bereits in diesem Kurs eingetragen.');
+        }
+
+        $db->prepare(
+            'INSERT INTO kurs_schueler (kurs_id, name_roh) VALUES (?, ?)'
+        )->execute([$kursId, $name]);
+
+        return ['kurs_schueler_id' => (int) $db->lastInsertId(), 'name_roh' => $name];
+    }
+
+    // ------------------------------------------------------------------
     // E-Mail manuell auslösen
     // ------------------------------------------------------------------
 

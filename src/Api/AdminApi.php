@@ -105,4 +105,65 @@ class AdminApi
 
         return ['kuerzel' => strtoupper($kuerzel), 'bezeichnung' => $bezeichnung];
     }
+
+    public static function deleteFach(string $kuerzel): array
+    {
+        $db = Database::getInstance();
+        $db->prepare('DELETE FROM fach_bezeichnungen WHERE kuerzel = ?')->execute([strtoupper($kuerzel)]);
+        return ['ok' => true];
+    }
+
+    // ------------------------------------------------------------------
+    // Stufen & Stufenleitungen
+    // ------------------------------------------------------------------
+
+    /** Alle Stufen (für Stufenleitungs-Zuweisung). */
+    public static function getStufen(): array
+    {
+        $db = Database::getInstance();
+        return $db->query(
+            'SELECT id, name, schuljahr FROM stufen ORDER BY schuljahr DESC, name'
+        )->fetchAll();
+    }
+
+    /** Stufen-IDs, für die ein Nutzer Stufenleitung ist. */
+    public static function getStufenleitungen(int $benutzerId): array
+    {
+        $db   = Database::getInstance();
+        $stmt = $db->prepare('SELECT stufe_id FROM stufenleitungen WHERE benutzer_id = ?');
+        $stmt->execute([$benutzerId]);
+        return $stmt->fetchAll(\PDO::FETCH_COLUMN);
+    }
+
+    /**
+     * Setzt die Stufen-Zuordnungen einer Stufenleitung (vollständig ersetzen).
+     * Body: { stufen_ids: [1, 2, ...] }
+     */
+    public static function setStufenleitungen(int $benutzerId, array $stufenIds): array
+    {
+        $db = Database::getInstance();
+
+        $exists = $db->prepare('SELECT 1 FROM benutzer WHERE id = ?');
+        $exists->execute([$benutzerId]);
+        if ($exists->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Benutzer*in $benutzerId nicht gefunden.");
+        }
+
+        $db->prepare('DELETE FROM stufenleitungen WHERE benutzer_id = ?')->execute([$benutzerId]);
+
+        $stufenIds = array_values(array_unique(array_map('intval', $stufenIds)));
+        if (!empty($stufenIds)) {
+            $platzhalter = implode(',', array_fill(0, count($stufenIds), '(?,?)'));
+            $params = [];
+            foreach ($stufenIds as $sid) {
+                $params[] = $benutzerId;
+                $params[] = $sid;
+            }
+            $db->prepare("INSERT INTO stufenleitungen (benutzer_id, stufe_id) VALUES $platzhalter")
+               ->execute($params);
+        }
+
+        return ['ok' => true, 'stufen' => $stufenIds];
+    }
 }

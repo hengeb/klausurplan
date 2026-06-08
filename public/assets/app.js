@@ -22,6 +22,18 @@ function hatRolle(...gesucht) {
     return gesucht.some(r => rollen.includes(r));
 }
 
+/** Macht ein Overlay-Element durch Backdrop-Klick und Escape schließbar. */
+function schliessbar(overlay) {
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    const onEsc = e => {
+        if (e.key === 'Escape' && overlay.isConnected) {
+            overlay.remove();
+            document.removeEventListener('keydown', onEsc);
+        }
+    };
+    document.addEventListener('keydown', onEsc);
+}
+
 // ---------------------------------------------------------------------------
 // Navigation & Routing (Hash-basiert)
 // ---------------------------------------------------------------------------
@@ -757,6 +769,23 @@ function renderKlausurenUebersicht(el, klausuren) {
         });
     });
 
+    // Klausur löschen (admin/SL)
+    el.querySelectorAll('.btn-klausur-loeschen').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id   = parseInt(btn.dataset.id);
+            const name = btn.dataset.name;
+            if (!confirm(`Klausur „${name}" wirklich löschen?\nAlle Anwesenheitsdaten dieser Klausur werden ebenfalls gelöscht.`)) return;
+            btn.disabled = true;
+            try {
+                await apiFetch(`/klausuren/${id}`, { method: 'DELETE' });
+                btn.closest('tr').remove();
+            } catch (err) {
+                alert(`Fehler: ${err.message}`);
+                btn.disabled = false;
+            }
+        });
+    });
+
     // E-Mail-Buttons (admin/SL)
     el.querySelectorAll('.btn-email-ausloesen').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -796,6 +825,7 @@ function renderKlausurZeile(k) {
         if (k.lehrer_id) {
             aktionen.push(`<button class="btn btn-klein btn-sekundaer btn-email-ausloesen" data-id="${k.id}" title="Anwesenheits-E-Mail senden">E-Mail</button>`);
         }
+        aktionen.push(`<button class="btn btn-klein btn-gefahr btn-klausur-loeschen" data-id="${k.id}" data-name="${escHtml(k.kurs_anzeigename)}">Löschen</button>`);
     }
     aktionen.push(`<button class="btn btn-klein btn-anwesenheit" data-id="${k.id}">Anwesenheit</button>`);
 
@@ -842,12 +872,43 @@ function zeigeKlausurBearbeitenDialog(k, nachSpeichern) {
                 <button class="btn btn-sekundaer" id="dlg-abbrechen">Abbrechen</button>
             </div>
             <p id="dlg-fehler" class="fehler" style="display:none"></p>
+            ${hatRolle('admin', 'stufenleitung') ? `
+            <details style="margin-top:1rem">
+                <summary style="cursor:pointer;font-size:.875rem;color:#555">Zusätzliche Prüflinge (nicht in GoMST)</summary>
+                <div style="margin-top:.6rem;display:flex;gap:.5rem;align-items:center">
+                    <input type="text" id="dlg-zusatz-name" placeholder="Name, z.B. Mustermann, Max"
+                           style="flex:1;padding:.3rem .5rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
+                    <button class="btn btn-klein btn-sekundaer" id="dlg-zusatz-btn">Hinzufügen</button>
+                </div>
+                <p id="dlg-zusatz-info" style="font-size:.8rem;margin:.4rem 0 0;color:#555"></p>
+            </details>` : ''}
         </div>
     `;
     document.body.appendChild(overlay);
 
     overlay.querySelector('#dlg-abbrechen').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    schliessbar(overlay);
+
+    if (hatRolle('admin', 'stufenleitung')) {
+        overlay.querySelector('#dlg-zusatz-btn').addEventListener('click', async () => {
+            const input  = overlay.querySelector('#dlg-zusatz-name');
+            const infoEl = overlay.querySelector('#dlg-zusatz-info');
+            const name   = input.value.trim();
+            if (!name) return;
+            try {
+                await apiFetch(`/stufenleitung/klausuren/${k.id}/zusatz-schueler`, {
+                    method: 'POST',
+                    body: JSON.stringify({ name }),
+                });
+                infoEl.style.color = '#27ae60';
+                infoEl.textContent = `✓ „${name}" hinzugefügt.`;
+                input.value = '';
+            } catch (err) {
+                infoEl.style.color = '#c0392b';
+                infoEl.textContent = err.message;
+            }
+        });
+    }
 
     overlay.querySelector('#dlg-speichern').addEventListener('click', async () => {
         const btn = overlay.querySelector('#dlg-speichern');
@@ -1120,7 +1181,7 @@ async function zeigeAnwesenheitDialog(klausur) {
     document.body.appendChild(overlay);
 
     overlay.querySelector('#aw-schliessen').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    schliessbar(overlay);
 
     // Anwesenheitsdaten laden
     let eintraege = [];
@@ -1362,57 +1423,91 @@ function renderNachschreibtermineList(el, termine) {
         <div class="karte nt-karte" data-id="${t.id}">
             <div class="nt-kopf">
                 <span class="nt-datum">${datum}, ${uhrzeit} Uhr${t.raum ? ' – ' + escHtml(t.raum) : ''}</span>
-                ${hatRolle('admin', 'stufenleitung') ? `
                 <div class="nt-aktionen">
+                    ${hatRolle('admin', 'stufenleitung', 'lehrkraft') ? `
+                    <button class="btn btn-klein btn-sekundaer btn-nt-anwesenheit" data-id="${t.id}">Anwesenheit</button>` : ''}
+                    ${hatRolle('admin', 'stufenleitung') ? `
                     <button class="btn btn-klein btn-sekundaer btn-nt-bearbeiten" data-id="${t.id}">Bearbeiten</button>
                     <button class="btn btn-klein btn-sekundaer btn-nt-klausuren" data-id="${t.id}">Klausuren verknüpfen</button>
-                </div>` : ''}
+                    <button class="btn btn-klein btn-gefahr btn-nt-loeschen" data-id="${t.id}">Löschen</button>` : ''}
+                </div>
             </div>
             ${t.bemerkung ? `<p class="nt-bemerkung">${escHtml(t.bemerkung)}</p>` : ''}
             <div class="nt-klausuren">${klausurenHtml}</div>
-            <div class="nt-edit-bereich versteckt"></div>
+            <div class="nt-edit-bereich-bearbeiten versteckt"></div>
+            <div class="nt-edit-bereich-klausuren versteckt"></div>
         </div>`;
     }).join('');
 
-    // Bearbeiten
+    // Bearbeiten (eigener Bereich, unabhängig von Klausuren verknüpfen)
     el.querySelectorAll('.btn-nt-bearbeiten').forEach(btn => {
         btn.addEventListener('click', () => {
-            const id    = parseInt(btn.dataset.id);
-            const karte = el.querySelector(`.nt-karte[data-id="${id}"]`);
-            const bereich = karte.querySelector('.nt-edit-bereich');
+            const id      = parseInt(btn.dataset.id);
+            const karte   = el.querySelector(`.nt-karte[data-id="${id}"]`);
+            const bereich = karte.querySelector('.nt-edit-bereich-bearbeiten');
+            const anderer = karte.querySelector('.nt-edit-bereich-klausuren');
+            anderer.classList.add('versteckt');
             bereich.classList.toggle('versteckt');
-            if (!bereich.classList.contains('versteckt') && bereich.children.length === 0) {
+            if (!bereich.classList.contains('versteckt')) {
+                bereich.innerHTML = '';
                 const t = termine.find(x => x.id === id);
                 renderNachschreibterminFormular(bereich, t, () => {
                     bereich.classList.add('versteckt');
-                    bereich.innerHTML = '';
                     ladeNachschreibtermine(el);
                 });
             }
         });
     });
 
-    // Klausuren verknüpfen
+    // Klausuren verknüpfen (eigener Bereich)
     el.querySelectorAll('.btn-nt-klausuren').forEach(btn => {
         btn.addEventListener('click', async () => {
-            const id    = parseInt(btn.dataset.id);
-            const karte = el.querySelector(`.nt-karte[data-id="${id}"]`);
-            const bereich = karte.querySelector('.nt-edit-bereich');
+            const id      = parseInt(btn.dataset.id);
+            const karte   = el.querySelector(`.nt-karte[data-id="${id}"]`);
+            const bereich = karte.querySelector('.nt-edit-bereich-klausuren');
+            const anderer = karte.querySelector('.nt-edit-bereich-bearbeiten');
+            anderer.classList.add('versteckt');
             bereich.classList.toggle('versteckt');
-            if (!bereich.classList.contains('versteckt') && bereich.children.length === 0) {
+            if (!bereich.classList.contains('versteckt')) {
                 bereich.innerHTML = '<p class="lade-text">Klausuren werden geladen…</p>';
                 try {
                     const alleKlausuren = await apiFetch('/klausuren?nachschreiber=1');
                     const t = termine.find(x => x.id === id);
                     renderKlausurVerknuepfung(bereich, id, alleKlausuren, t.klausuren, () => {
                         bereich.classList.add('versteckt');
-                        bereich.innerHTML = '';
                         ladeNachschreibtermine(el);
                     });
                 } catch (err) {
                     bereich.innerHTML = `<p class="fehler">${err.message}</p>`;
                 }
             }
+        });
+    });
+
+    // Löschen
+    el.querySelectorAll('.btn-nt-loeschen').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id    = parseInt(btn.dataset.id);
+            const t     = termine.find(x => x.id === id);
+            const label = t ? formatDatum(t.termin_datum) : `Termin ${id}`;
+            if (!confirm(`Nachschreibtermin vom ${label} wirklich löschen?\nAlle verknüpften Daten werden gelöscht.`)) return;
+            btn.disabled = true;
+            try {
+                await apiFetch(`/nachschreibtermine/${id}`, { method: 'DELETE' });
+                el.querySelector(`.nt-karte[data-id="${id}"]`).remove();
+            } catch (err) {
+                alert(`Fehler: ${err.message}`);
+                btn.disabled = false;
+            }
+        });
+    });
+
+    // Anwesenheit
+    el.querySelectorAll('.btn-nt-anwesenheit').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const t  = termine.find(x => x.id === id);
+            if (t) zeigeNachschreibAnwesenheitDialog(t);
         });
     });
 }
@@ -1683,6 +1778,11 @@ async function viewAdmin(el) {
     el.innerHTML = `
         <h2>Administration</h2>
         <div class="karte">
+            <h3>Benutzerverwaltung</h3>
+            <p>Rollen und Stufenzuordnungen der angemeldeten Nutzer*innen verwalten.</p>
+            <div id="benutzer-container"></div>
+        </div>
+        <div class="karte">
             <h3>Moodle-Nutzer synchronisieren</h3>
             <p>
                 Liest alle aktiven Nutzer*innen aus Moodle und aktualisiert
@@ -1723,8 +1823,11 @@ async function viewAdmin(el) {
         }
     });
 
-    // Fächerliste laden und rendern
-    await ladeFaecherAbschnitt(el);
+    // Benutzer- und Fächerliste laden
+    await Promise.all([
+        ladeBenutzerAbschnitt(el),
+        ladeFaecherAbschnitt(el),
+    ]);
 }
 
 async function ladeFaecherAbschnitt(el) {
@@ -1749,16 +1852,34 @@ async function ladeFaecherAbschnitt(el) {
             <td>
                 <button class="btn btn-klein btn-fach-speichern">Speichern</button>
                 <span class="fach-ok" style="display:none;color:#27ae60;font-size:.8rem;margin-left:.4rem">✓</span>
+                <button class="btn btn-klein btn-gefahr btn-fach-loeschen" style="margin-left:.25rem">Löschen</button>
             </td>
         </tr>`).join('');
 
     container.innerHTML = `
-        <div class="tabelle-wrapper">
+        <div class="tabelle-wrapper" style="margin-bottom:.75rem">
             <table class="data-tabelle">
                 <thead><tr><th>Kürzel</th><th>Bezeichnung</th><th></th></tr></thead>
                 <tbody>${zeilen}</tbody>
             </table>
-        </div>`;
+        </div>
+        <details class="fach-neu-details">
+            <summary style="cursor:pointer;font-weight:600;font-size:.875rem">+ Neues Fach hinzufügen</summary>
+            <div style="display:flex;gap:.5rem;align-items:flex-end;margin-top:.5rem;flex-wrap:wrap">
+                <div>
+                    <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Kürzel</label>
+                    <input type="text" id="fach-neu-kuerzel" placeholder="z.B. PS" maxlength="10"
+                           style="width:80px;padding:.3rem .4rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
+                </div>
+                <div>
+                    <label style="display:block;font-size:.8rem;margin-bottom:.2rem">Bezeichnung</label>
+                    <input type="text" id="fach-neu-bezeichnung" placeholder="z.B. Psychologie" maxlength="100"
+                           style="width:200px;padding:.3rem .4rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
+                </div>
+                <button class="btn" id="fach-neu-btn">Hinzufügen</button>
+                <span id="fach-neu-info" style="font-size:.85rem"></span>
+            </div>
+        </details>`;
 
     container.querySelectorAll('.btn-fach-speichern').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -1782,6 +1903,51 @@ async function ladeFaecherAbschnitt(el) {
                 btn.disabled = false;
             }
         });
+    });
+
+    container.querySelectorAll('.btn-fach-loeschen').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const tr      = btn.closest('tr');
+            const kuerzel = tr.dataset.kuerzel;
+            if (!confirm(`Fach „${kuerzel}" wirklich löschen?`)) return;
+            btn.disabled = true;
+            try {
+                await apiFetch(`/admin/faecher/${encodeURIComponent(kuerzel)}`, { method: 'DELETE' });
+                tr.remove();
+            } catch (err) {
+                alert(`Fehler: ${err.message}`);
+                btn.disabled = false;
+            }
+        });
+    });
+
+    container.querySelector('#fach-neu-btn').addEventListener('click', async () => {
+        const kuerzelInput     = container.querySelector('#fach-neu-kuerzel');
+        const bezeichnungInput = container.querySelector('#fach-neu-bezeichnung');
+        const infoEl           = container.querySelector('#fach-neu-info');
+        const kuerzel          = kuerzelInput.value.trim().toUpperCase();
+        const bezeichnung      = bezeichnungInput.value.trim();
+        if (!kuerzel || !bezeichnung) {
+            infoEl.style.color = '#c0392b';
+            infoEl.textContent = 'Kürzel und Bezeichnung erforderlich.';
+            return;
+        }
+
+        try {
+            await apiFetch('/admin/faecher', {
+                method: 'POST',
+                body:   JSON.stringify({ kuerzel, bezeichnung }),
+            });
+            infoEl.style.color  = '#27ae60';
+            infoEl.textContent  = `✓ „${kuerzel}" hinzugefügt.`;
+            kuerzelInput.value  = '';
+            bezeichnungInput.value = '';
+            // Tabelle neu laden
+            await ladeFaecherAbschnitt(document);
+        } catch (err) {
+            infoEl.style.color = '#c0392b';
+            infoEl.textContent = err.message;
+        }
     });
 }
 
@@ -1851,6 +2017,266 @@ async function viewSchueler(el) {
                 </table>
             </div>
         </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Nachschreib-Anwesenheit Dialog
+// ---------------------------------------------------------------------------
+
+async function zeigeNachschreibAnwesenheitDialog(termin) {
+    const datumStr = termin.termin_datum ? formatDatum(termin.termin_datum) : '–';
+    const overlay  = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+        <div class="dialog dialog-anwesenheit">
+            <h3>Anwesenheit Nachschreibtermin</h3>
+            <p class="dialog-kursname">${datumStr}${termin.raum ? ', ' + escHtml(termin.raum) : ''}</p>
+            <div id="ns-aw-inhalt"><p class="lade-text">Wird geladen…</p></div>
+            <div class="dialog-aktionen" style="margin-top:.75rem">
+                <button class="btn" id="ns-aw-speichern" disabled>Speichern</button>
+                <button class="btn btn-sekundaer" id="ns-aw-schliessen">Schließen</button>
+            </div>
+            <p id="ns-aw-fehler" class="fehler" style="display:none"></p>
+            <p id="ns-aw-ok" class="ok-text" style="display:none"></p>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#ns-aw-schliessen').addEventListener('click', () => overlay.remove());
+    schliessbar(overlay);
+
+    let eintraege = [];
+    try {
+        eintraege = await apiFetch(`/nachschreib-anwesenheit/${termin.id}`);
+    } catch (err) {
+        overlay.querySelector('#ns-aw-inhalt').innerHTML = `<p class="fehler">${escHtml(err.message)}</p>`;
+        return;
+    }
+
+    if (eintraege.length === 0) {
+        overlay.querySelector('#ns-aw-inhalt').innerHTML =
+            '<p class="hinweis">Keine Nachschreiber*innen für diesen Termin.</p>';
+        return;
+    }
+
+    const status = {};
+    for (const e of eintraege) {
+        status[e.kurs_schueler_id] = { status: e.status, kommentar: e.kommentar ?? '' };
+    }
+
+    const zeilen = eintraege.map(e => {
+        const name = e.nachname
+            ? `${escHtml(e.nachname)}, ${escHtml(e.vorname ?? '')}`
+            : escHtml((e.name_roh ?? '').replace('|', ', '));
+        const kursTag = e.kurs_anzeigename
+            ? ` <span class="klausur-tag" style="font-size:.75rem">${escHtml(e.kurs_anzeigename)}</span>`
+            : '';
+        return `
+        <tr class="aw-zeile" data-id="${e.kurs_schueler_id}">
+            <td>${name}${kursTag}</td>
+            <td class="td-status">
+                <div class="status-gruppe">
+                    <button type="button" class="btn-status ${e.status === 'anwesend'   ? 'aktiv status-anwesend'   : ''}" data-status="anwesend">Anwesend</button>
+                    <button type="button" class="btn-status ${e.status === 'fehlend'    ? 'aktiv status-fehlend'    : ''}" data-status="fehlend">Fehlend</button>
+                    <button type="button" class="btn-status ${e.status === 'ausstehend' ? 'aktiv status-ausstehend' : ''}" data-status="ausstehend">?</button>
+                </div>
+            </td>
+            <td>
+                <input type="text" class="aw-kommentar" placeholder="Kommentar" value="${escHtml(e.kommentar ?? '')}"
+                       style="width:100%;max-width:200px;padding:.25rem .4rem;border:1px solid #ccc;border-radius:3px;font-size:.875rem">
+            </td>
+        </tr>`;
+    }).join('');
+
+    overlay.querySelector('#ns-aw-inhalt').innerHTML = `
+        <div style="margin-bottom:.5rem">
+            <button class="btn btn-klein btn-sekundaer" id="ns-alle-anwesend">Alle anwesend</button>
+        </div>
+        <div class="tabelle-wrapper aw-tabelle-wrapper">
+            <table class="aw-tabelle">
+                <thead><tr><th>Name</th><th>Status</th><th>Kommentar</th></tr></thead>
+                <tbody>${zeilen}</tbody>
+            </table>
+        </div>`;
+
+    overlay.querySelector('#ns-aw-speichern').disabled = false;
+
+    overlay.querySelector('#ns-alle-anwesend').addEventListener('click', () => {
+        overlay.querySelectorAll('.aw-zeile').forEach(z => setzeStatus(z, 'anwesend', status));
+    });
+
+    overlay.querySelectorAll('.btn-status').forEach(btn => {
+        btn.addEventListener('click', () => setzeStatus(btn.closest('.aw-zeile'), btn.dataset.status, status));
+    });
+
+    overlay.querySelectorAll('.aw-kommentar').forEach(input => {
+        input.addEventListener('input', () => {
+            status[parseInt(input.closest('.aw-zeile').dataset.id)].kommentar = input.value;
+        });
+    });
+
+    overlay.querySelector('#ns-aw-speichern').addEventListener('click', async () => {
+        const btn      = overlay.querySelector('#ns-aw-speichern');
+        const fehlerEl = overlay.querySelector('#ns-aw-fehler');
+        const okEl     = overlay.querySelector('#ns-aw-ok');
+        btn.disabled   = true;
+        fehlerEl.style.display = okEl.style.display = 'none';
+
+        const payload = Object.entries(status).map(([id, s]) => ({
+            kurs_schueler_id: parseInt(id),
+            status:           s.status,
+            kommentar:        s.kommentar || '',
+        }));
+
+        try {
+            const res = await apiFetch(`/nachschreib-anwesenheit/${termin.id}`, {
+                method: 'POST',
+                body:   JSON.stringify(payload),
+            });
+            okEl.textContent   = `✓ ${res.gespeichert} Eintrag/Einträge gespeichert.`;
+            okEl.style.display = '';
+        } catch (err) {
+            fehlerEl.textContent   = err.message;
+            fehlerEl.style.display = '';
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Admin: Benutzerverwaltung (Rollenzuweisung)
+// ---------------------------------------------------------------------------
+
+async function ladeBenutzerAbschnitt(el) {
+    const container = el.querySelector('#benutzer-container');
+    container.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+
+    let [benutzer, stufen] = await Promise.all([
+        apiFetch('/admin/benutzer'),
+        apiFetch('/admin/stufen').catch(() => []),
+    ]);
+
+    if (benutzer.length === 0) {
+        container.innerHTML = '<p>Keine Benutzer*innen gefunden.</p>';
+        return;
+    }
+
+    const stufenOptionen = stufen.map(s =>
+        `<option value="${s.id}">${escHtml(s.name)} (${escHtml(s.schuljahr)})</option>`
+    ).join('');
+
+    const zeilen = benutzer.map(b => {
+        const rArr   = b.rollen ?? [];
+        const badges = rArr.length
+            ? rArr.map(r => `<span class="rolle-badge rolle-${r}">${r}</span>`).join(' ')
+            : '<span class="fehlend">–</span>';
+        return `
+        <tr data-id="${b.id}">
+            <td>${escHtml(b.nachname)}, ${escHtml(b.vorname)}</td>
+            <td class="td-rollen">${badges}</td>
+            <td>
+                <button class="btn btn-klein btn-sekundaer btn-rollen-bearbeiten"
+                        data-id="${b.id}">Bearbeiten</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    container.innerHTML = `
+        <div class="tabelle-wrapper">
+            <table class="data-tabelle">
+                <thead><tr><th>Name</th><th>Rollen</th><th></th></tr></thead>
+                <tbody>${zeilen}</tbody>
+            </table>
+        </div>`;
+
+    container.querySelectorAll('.btn-rollen-bearbeiten').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const bid  = parseInt(btn.dataset.id);
+            const row  = container.querySelector(`tr[data-id="${bid}"]`);
+            const b    = benutzer.find(x => x.id === bid);
+            const rArr = b.rollen ?? [];
+
+            // Stufen-Zuordnungen laden wenn SL
+            let slStufen = [];
+            if (rArr.includes('stufenleitung')) {
+                slStufen = await apiFetch(`/admin/benutzer/${bid}/stufenleitungen`).catch(() => []);
+            }
+
+            const overlay = document.createElement('div');
+            overlay.className = 'dialog-overlay';
+            overlay.innerHTML = `
+                <div class="dialog">
+                    <h3>Rollen: ${escHtml(b.vorname)} ${escHtml(b.nachname)}</h3>
+                    <div class="formular-gruppe">
+                        ${['admin','stufenleitung','lehrkraft','schueler'].map(r => `
+                        <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+                            <input type="checkbox" class="cb-rolle" value="${r}" ${rArr.includes(r) ? 'checked' : ''}>
+                            ${r}
+                        </label>`).join('')}
+                    </div>
+                    <div id="sl-stufen-abschnitt" style="${rArr.includes('stufenleitung') ? '' : 'display:none'}">
+                        <label style="font-size:.875rem;font-weight:600">Stufen (Stufenleitung):</label>
+                        <select id="sl-stufen" multiple size="5" style="width:100%;margin-top:.3rem;border:1px solid #ccc;border-radius:3px;padding:.3rem">
+                            ${stufenOptionen}
+                        </select>
+                    </div>
+                    <div class="dialog-aktionen">
+                        <button class="btn" id="rollen-speichern">Speichern</button>
+                        <button class="btn btn-sekundaer" id="rollen-abbrechen">Abbrechen</button>
+                    </div>
+                    <p id="rollen-fehler" class="fehler" style="display:none"></p>
+                </div>`;
+            document.body.appendChild(overlay);
+            schliessbar(overlay);
+            overlay.querySelector('#rollen-abbrechen').addEventListener('click', () => overlay.remove());
+
+            // Vorselektierte Stufen
+            const slSelect = overlay.querySelector('#sl-stufen');
+            slStufen.forEach(sid => {
+                const opt = slSelect.querySelector(`option[value="${sid}"]`);
+                if (opt) opt.selected = true;
+            });
+
+            // Stufenleitung-Checkbox zeigt/versteckt Stufen-Picker
+            overlay.querySelector('.cb-rolle[value="stufenleitung"]').addEventListener('change', e => {
+                overlay.querySelector('#sl-stufen-abschnitt').style.display = e.target.checked ? '' : 'none';
+            });
+
+            overlay.querySelector('#rollen-speichern').addEventListener('click', async () => {
+                const saveBtn  = overlay.querySelector('#rollen-speichern');
+                const fehlerEl = overlay.querySelector('#rollen-fehler');
+                saveBtn.disabled = true;
+                fehlerEl.style.display = 'none';
+
+                const neueRollen = [...overlay.querySelectorAll('.cb-rolle:checked')].map(cb => cb.value);
+                const neueStufen = neueRollen.includes('stufenleitung')
+                    ? [...slSelect.selectedOptions].map(o => parseInt(o.value))
+                    : [];
+
+                try {
+                    await apiFetch(`/admin/benutzer/${bid}/rollen`, {
+                        method: 'POST',
+                        body: JSON.stringify({ rollen: neueRollen }),
+                    });
+                    if (neueRollen.includes('stufenleitung')) {
+                        await apiFetch(`/admin/benutzer/${bid}/stufenleitungen`, {
+                            method: 'POST',
+                            body: JSON.stringify({ stufen_ids: neueStufen }),
+                        });
+                    }
+                    b.rollen = neueRollen;
+                    const badges = neueRollen.length
+                        ? neueRollen.map(r => `<span class="rolle-badge rolle-${r}">${r}</span>`).join(' ')
+                        : '<span class="fehlend">–</span>';
+                    row.querySelector('.td-rollen').innerHTML = badges;
+                    overlay.remove();
+                } catch (err) {
+                    fehlerEl.textContent   = err.message;
+                    fehlerEl.style.display = '';
+                    saveBtn.disabled = false;
+                }
+            });
+        });
+    });
 }
 
 // ---------------------------------------------------------------------------

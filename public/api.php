@@ -61,6 +61,17 @@ $router->get('/admin/faecher', function (): array {
     return AdminApi::getFaecher();
 }, 'admin');
 
+$router->post('/admin/faecher', function (): array {
+    $body = Router::jsonBody();
+    $kuerzel     = trim($body['kuerzel']     ?? '');
+    $bezeichnung = trim($body['bezeichnung'] ?? '');
+    if (empty($kuerzel) || empty($bezeichnung)) {
+        http_response_code(400);
+        return ['fehler' => 'kuerzel und bezeichnung erforderlich'];
+    }
+    return AdminApi::updateFach($kuerzel, $bezeichnung);
+}, 'admin');
+
 $router->put('/admin/faecher/{kuerzel}', function (array $p): array {
     $body = Router::jsonBody();
     $bezeichnung = trim($body['bezeichnung'] ?? '');
@@ -69,6 +80,28 @@ $router->put('/admin/faecher/{kuerzel}', function (array $p): array {
         return ['fehler' => 'bezeichnung fehlt'];
     }
     return AdminApi::updateFach($p['kuerzel'], $bezeichnung);
+}, 'admin');
+
+$router->delete('/admin/faecher/{kuerzel}', function (array $p): array {
+    return AdminApi::deleteFach($p['kuerzel']);
+}, 'admin');
+
+$router->get('/admin/stufen', function (): array {
+    return AdminApi::getStufen();
+}, 'admin');
+
+$router->get('/admin/benutzer/{id}/stufenleitungen', function (array $p): array {
+    return AdminApi::getStufenleitungen((int) $p['id']);
+}, 'admin');
+
+$router->post('/admin/benutzer/{id}/stufenleitungen', function (array $p): array {
+    $body      = Router::jsonBody();
+    $stufenIds = $body['stufen_ids'] ?? [];
+    if (!is_array($stufenIds)) {
+        http_response_code(400);
+        return ['fehler' => 'stufen_ids muss ein Array sein'];
+    }
+    return AdminApi::setStufenleitungen((int) $p['id'], $stufenIds);
 }, 'admin');
 
 // ------------------------------------------------------------------
@@ -131,6 +164,10 @@ $router->put('/klausuren/{id}', function (array $p): array {
     return LehrkraftApi::putKlausur((int) $p['id'], Router::jsonBody());
 }, 'admin', 'stufenleitung');
 
+$router->delete('/klausuren/{id}', function (array $p): array {
+    return LehrkraftApi::deleteKlausur((int) $p['id']);
+}, 'admin', 'stufenleitung');
+
 // ------------------------------------------------------------------
 // Kursliste (für Dropdown)
 // ------------------------------------------------------------------
@@ -157,6 +194,10 @@ $router->post('/nachschreibtermine/{id}/klausuren', function (array $p): array {
     return LehrkraftApi::postNachschreibterminKlausuren((int) $p['id'], Router::jsonBody());
 }, 'admin', 'stufenleitung');
 
+$router->delete('/nachschreibtermine/{id}', function (array $p): array {
+    return LehrkraftApi::deleteNachschreibtermin((int) $p['id']);
+}, 'admin', 'stufenleitung');
+
 // ------------------------------------------------------------------
 // Anwesenheit
 // ------------------------------------------------------------------
@@ -172,6 +213,13 @@ $router->post('/anwesenheit/{klausur_id}', function (array $p): array {
     }
     return AnwesenheitApi::postAnwesenheit((int) $p['klausur_id'], $eintraege);
 }, 'admin', 'stufenleitung', 'lehrkraft');
+
+// ------------------------------------------------------------------
+// Stufenleitung – Zusätzliche Prüflinge (Gastschüler*innen)
+// ------------------------------------------------------------------
+$router->post('/stufenleitung/klausuren/{klausur_id}/zusatz-schueler', function (array $p): array {
+    return StufenleitungApi::addZusatzSchueler((int) $p['klausur_id'], Router::jsonBody());
+}, 'admin', 'stufenleitung');
 
 // ------------------------------------------------------------------
 // Stufenleitung – Entschuldigung
@@ -193,6 +241,22 @@ $router->post('/stufenleitung/email-ausloesen/{klausur_id}', function (array $p)
 $router->delete('/stufenleitung/daten/{halbjahr_id}', function (array $p): array {
     return StufenleitungApi::deleteHalbjahr((int) $p['halbjahr_id']);
 }, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Nachschreib-Anwesenheit
+// ------------------------------------------------------------------
+$router->get('/nachschreib-anwesenheit/{id}', function (array $p): array {
+    return AnwesenheitApi::getNachschreibAnwesenheit((int) $p['id']);
+}, 'admin', 'stufenleitung', 'lehrkraft');
+
+$router->post('/nachschreib-anwesenheit/{id}', function (array $p): array {
+    $eintraege = Router::jsonBody();
+    if (!is_array($eintraege)) {
+        http_response_code(400);
+        return ['fehler' => 'Array erwartet'];
+    }
+    return AnwesenheitApi::postNachschreibAnwesenheit((int) $p['id'], $eintraege);
+}, 'admin', 'stufenleitung', 'lehrkraft');
 
 // ------------------------------------------------------------------
 // Schüler*innen
