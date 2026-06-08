@@ -982,7 +982,6 @@ function renderKlausurenUebersicht(el, klausuren) {
                         <th>Datum</th>
                         <th>Uhrzeit</th>
                         <th>Dauer</th>
-                        <th>Raum</th>
                         <th>TN</th>
                         <th>Anw.</th>
                         <th></th>
@@ -1060,7 +1059,6 @@ function renderKlausurZeile(k) {
     const datum   = k.termin_datum    ? formatDatum(k.termin_datum)       : '<span class="fehlend">–</span>';
     const uhrzeit = k.termin_uhrzeit  ? k.termin_uhrzeit.substring(0, 5)  : '–';
     const dauer   = k.dauer_minuten   ? `${k.dauer_minuten} min`          : '–';
-    const raum    = k.raum            ? escHtml(k.raum)                   : '–';
     const lk = k.lehrer_id
         ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}`
         : `<span class="fehlend">${escHtml(k.lehrer_kuerzel ?? '–')}</span>`;
@@ -1083,7 +1081,6 @@ function renderKlausurZeile(k) {
             <td>${datum}</td>
             <td>${uhrzeit}</td>
             <td>${dauer}</td>
-            <td>${raum}</td>
             <td>${k.schueler_anzahl}</td>
             <td class="td-aw-status">${renderAnwesenheitStatus(k.anwesenheit_erfasst, k.schueler_anzahl)}</td>
             <td class="td-aktionen">${aktionen.join(' ')}</td>
@@ -1108,10 +1105,6 @@ function zeigeKlausurBearbeitenDialog(k, nachSpeichern) {
             <div class="formular-gruppe">
                 <label>Dauer (Minuten)</label>
                 <input type="number" id="dlg-dauer" min="1" max="600" value="${k.dauer_minuten ?? ''}">
-            </div>
-            <div class="formular-gruppe">
-                <label>Raum</label>
-                <input type="text" id="dlg-raum" value="${escHtml(k.raum ?? '')}">
             </div>
             <div class="dialog-aktionen">
                 <button class="btn" id="dlg-speichern">Speichern</button>
@@ -1138,7 +1131,6 @@ function zeigeKlausurBearbeitenDialog(k, nachSpeichern) {
                     termin_datum:    overlay.querySelector('#dlg-datum').value   || null,
                     termin_uhrzeit:  overlay.querySelector('#dlg-uhrzeit').value || null,
                     dauer_minuten:   parseInt(overlay.querySelector('#dlg-dauer').value) || null,
-                    raum:            overlay.querySelector('#dlg-raum').value    || null,
                 }),
             });
             overlay.remove();
@@ -1197,10 +1189,6 @@ function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
                 <label for="neu-dauer">Dauer (Minuten)</label>
                 <input type="number" id="neu-dauer" min="1" max="600" placeholder="z.B. 90">
             </div>
-            <div class="formular-gruppe">
-                <label for="neu-raum">Raum</label>
-                <input type="text" id="neu-raum" placeholder="z.B. Aula">
-            </div>
             <div class="formular-zeile">
                 <button class="btn" id="neu-speichern">Klausur anlegen</button>
             </div>
@@ -1233,7 +1221,6 @@ function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
                     termin_datum:   el.querySelector('#neu-datum').value   || null,
                     termin_uhrzeit: el.querySelector('#neu-uhrzeit').value || null,
                     dauer_minuten:  parseInt(el.querySelector('#neu-dauer').value) || null,
-                    raum:           el.querySelector('#neu-raum').value    || null,
                 }),
             });
             okEl.textContent = '✓ Klausur angelegt.';
@@ -1243,7 +1230,6 @@ function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
             el.querySelector('#neu-datum').value  = '';
             el.querySelector('#neu-uhrzeit').value = '';
             el.querySelector('#neu-dauer').value  = '';
-            el.querySelector('#neu-raum').value   = '';
         } catch (err) {
             fehlerEl.textContent = err.message;
             fehlerEl.style.display = '';
@@ -1259,7 +1245,7 @@ function ladePasteImport(el, nachImport) {
             <h3>Excel-Import</h3>
             <p>
                 Laden Sie die Vorlage herunter – sie enthält bereits alle Kurse des aktuellen Halbjahres.
-                Öffnen Sie sie in Excel, tragen Sie Datum, Uhrzeit, Dauer und Raum ein.
+                Öffnen Sie sie in Excel, tragen Sie Datum, Uhrzeit und Dauer ein.
                 Dann alles markieren (Strg+A), kopieren (Strg+C), in das Textfeld unten klicken und einfügen (Strg+V).
             </p>
             <p class="hinweis">
@@ -1290,7 +1276,7 @@ function parsePasteVorschau(text, vorschauEl, nachImport) {
     }
 
     const header = zeilen[0].split('\t').map(h => h.trim().toLowerCase());
-    const felder  = ['kurs', 'datum', 'uhrzeit', 'dauer', 'raum'];
+    const felder  = ['kurs', 'datum', 'uhrzeit', 'dauer'];
     const fehlendeFelder = ['kurs'].filter(f => !header.includes(f));
 
     if (fehlendeFelder.length > 0) {
@@ -1313,14 +1299,13 @@ function parsePasteVorschau(text, vorschauEl, nachImport) {
             <td>${escHtml(d.datum ?? '')}</td>
             <td>${escHtml(d.uhrzeit ?? '')}</td>
             <td>${escHtml(d.dauer ?? '')}</td>
-            <td>${escHtml(d.raum ?? '')}</td>
         </tr>`).join('');
 
     vorschauEl.innerHTML = `
         <div class="tabelle-wrapper" style="margin-top:1rem">
             <p class="tabelle-hinweis">${daten.length} Zeile(n) erkannt. Vorschau:</p>
             <table class="klausur-tabelle">
-                <thead><tr><th>#</th><th>Kurs</th><th>Datum</th><th>Uhrzeit</th><th>Dauer</th><th>Raum</th></tr></thead>
+                <thead><tr><th>#</th><th>Kurs</th><th>Datum</th><th>Uhrzeit</th><th>Dauer</th></tr></thead>
                 <tbody>${zeileHtml}</tbody>
             </table>
         </div>
@@ -1637,7 +1622,7 @@ function renderNachschreibtermineList(el, termine) {
         return `
         <div class="karte nt-karte" data-id="${t.id}">
             <div class="nt-kopf">
-                <span class="nt-datum">${datum}, ${uhrzeit} Uhr${t.raum ? ' – ' + escHtml(t.raum) : ''}</span>
+                <span class="nt-datum">${datum}, ${uhrzeit} Uhr</span>
                 <div class="nt-aktionen">
                     ${hatRolle('admin', 'stufenleitung', 'lehrkraft') ? `
                     <button class="btn btn-klein btn-sekundaer btn-nt-anwesenheit" data-id="${t.id}">Anwesenheit</button>` : ''}
@@ -1762,10 +1747,6 @@ function renderNachschreibterminFormular(el, vorhandener, nachSpeichern) {
                 <input type="time" class="nt-uhrzeit" value="${vorhandener?.termin_uhrzeit ? vorhandener.termin_uhrzeit.substring(0,5) : ''}">
             </div>
             <div class="formular-gruppe">
-                <label>Raum</label>
-                <input type="text" class="nt-raum" value="${escHtml(vorhandener?.raum ?? '')}">
-            </div>
-            <div class="formular-gruppe">
                 <label>Bemerkung</label>
                 <input type="text" class="nt-bemerkung" value="${escHtml(vorhandener?.bemerkung ?? '')}">
             </div>
@@ -1788,7 +1769,6 @@ function renderNachschreibterminFormular(el, vorhandener, nachSpeichern) {
         const body = {
             termin_datum:    el.querySelector('.nt-datum').value    || null,
             termin_uhrzeit:  el.querySelector('.nt-uhrzeit').value  || null,
-            raum:            el.querySelector('.nt-raum').value     || null,
             bemerkung:       el.querySelector('.nt-bemerkung').value || null,
         };
 
@@ -2224,7 +2204,6 @@ async function viewSchueler(el) {
         const datum   = k.termin_datum   ? formatDatum(k.termin_datum)      : '<span class="fehlend">–</span>';
         const uhrzeit = k.termin_uhrzeit ? k.termin_uhrzeit.substring(0, 5) : '–';
         const dauer   = k.dauer_minuten  ? `${k.dauer_minuten} min`         : '–';
-        const raum    = k.raum           ? escHtml(k.raum)                  : '–';
         const nr      = k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : '';
 
         const datumKlasse = !k.termin_datum ? ' class="fehlend"' : '';
@@ -2235,7 +2214,6 @@ async function viewSchueler(el) {
             <td>${datum}</td>
             <td>${uhrzeit}</td>
             <td>${dauer}</td>
-            <td>${raum}</td>
         </tr>`;
     }).join('');
 
@@ -2250,7 +2228,6 @@ async function viewSchueler(el) {
                             <th>Datum</th>
                             <th>Uhrzeit</th>
                             <th>Dauer</th>
-                            <th>Raum</th>
                         </tr>
                     </thead>
                     <tbody>${zeilen}</tbody>
@@ -2270,7 +2247,7 @@ async function zeigeNachschreibAnwesenheitDialog(termin) {
     overlay.innerHTML = `
         <div class="dialog dialog-anwesenheit">
             <h3>Anwesenheit Nachschreibtermin</h3>
-            <p class="dialog-kursname">${datumStr}${termin.raum ? ', ' + escHtml(termin.raum) : ''}</p>
+            <p class="dialog-kursname">${datumStr}</p>
             <div id="ns-aw-inhalt"><p class="lade-text">Wird geladen…</p></div>
             <div class="dialog-aktionen" style="margin-top:.75rem">
                 <button class="btn" id="ns-aw-speichern" disabled>Speichern</button>

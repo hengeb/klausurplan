@@ -15,7 +15,7 @@ class SchuelerApi
      *
      * @return list<array{kurs_anzeigename: string, kursart: string, klausur_nr: int,
      *                     termin_datum: ?string, termin_uhrzeit: ?string,
-     *                     dauer_minuten: ?int, raum: ?string}>
+     *                     dauer_minuten: ?int}>
      */
     public static function meineKlausuren(): array
     {
@@ -29,8 +29,7 @@ class SchuelerApi
                     kl.klausur_nr,
                     kl.termin_datum,
                     kl.termin_uhrzeit,
-                    kl.dauer_minuten,
-                    kl.raum
+                    kl.dauer_minuten
              FROM kurs_schueler ks
              JOIN kurse k      ON k.id     = ks.kurs_id
              JOIN klausuren kl ON kl.kurs_id = k.id

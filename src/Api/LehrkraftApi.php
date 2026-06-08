@@ -53,7 +53,6 @@ class LehrkraftApi
                     k.termin_datum,
                     k.termin_uhrzeit,
                     k.dauer_minuten,
-                    k.raum,
                     k.erstellt_am,
                     kurs.id           AS kurs_id,
                     kurs.kurs_kuerzel,
@@ -124,7 +123,7 @@ class LehrkraftApi
     /**
      * Legt eine einzelne Klausur an.
      *
-     * Body: { kurs_id, klausur_nr?, termin_datum?, termin_uhrzeit?, dauer_minuten?, raum? }
+     * Body: { kurs_id, klausur_nr?, termin_datum?, termin_uhrzeit?, dauer_minuten? }
      */
     public static function postKlausur(array $body): array
     {
@@ -150,18 +149,17 @@ class LehrkraftApi
             ? (int) $body['klausur_nr']
             : self::naechsteKlausurNr($db, $kursId);
 
-        $datum    = self::validierteDatum($body['termin_datum']    ?? null);
-        $uhrzeit  = self::validierteUhrzeit($body['termin_uhrzeit'] ?? null);
-        $dauer    = isset($body['dauer_minuten']) && (int) $body['dauer_minuten'] > 0
+        $datum   = self::validierteDatum($body['termin_datum']    ?? null);
+        $uhrzeit = self::validierteUhrzeit($body['termin_uhrzeit'] ?? null);
+        $dauer   = isset($body['dauer_minuten']) && (int) $body['dauer_minuten'] > 0
             ? (int) $body['dauer_minuten'] : null;
-        $raum     = ($body['raum'] ?? '') !== '' ? trim($body['raum']) : null;
 
         $benutzer = Session::getBenutzer();
 
         $db->prepare(
-            'INSERT INTO klausuren (kurs_id, klausur_nr, termin_datum, termin_uhrzeit, dauer_minuten, raum, erstellt_von)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$kursId, $klausurNr, $datum, $uhrzeit, $dauer, $raum, $benutzer['id']]);
+            'INSERT INTO klausuren (kurs_id, klausur_nr, termin_datum, termin_uhrzeit, dauer_minuten, erstellt_von)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute([$kursId, $klausurNr, $datum, $uhrzeit, $dauer, $benutzer['id']]);
 
         return ['id' => (int) $db->lastInsertId(), 'klausur_nr' => $klausurNr];
     }
@@ -173,7 +171,7 @@ class LehrkraftApi
     /**
      * Aktualisiert eine Klausur.
      *
-     * Body: { termin_datum?, termin_uhrzeit?, dauer_minuten?, raum? }
+     * Body: { termin_datum?, termin_uhrzeit?, dauer_minuten? }
      */
     public static function putKlausur(int $id, array $body): array
     {
@@ -191,13 +189,12 @@ class LehrkraftApi
         $uhrzeit = self::validierteUhrzeit($body['termin_uhrzeit'] ?? null);
         $dauer   = isset($body['dauer_minuten']) && (int) $body['dauer_minuten'] > 0
             ? (int) $body['dauer_minuten'] : null;
-        $raum    = ($body['raum'] ?? '') !== '' ? trim($body['raum']) : null;
 
         $db->prepare(
             'UPDATE klausuren
-             SET termin_datum = ?, termin_uhrzeit = ?, dauer_minuten = ?, raum = ?
+             SET termin_datum = ?, termin_uhrzeit = ?, dauer_minuten = ?
              WHERE id = ?'
-        )->execute([$datum, $uhrzeit, $dauer, $raum, $id]);
+        )->execute([$datum, $uhrzeit, $dauer, $id]);
 
         return ['ok' => true];
     }
@@ -210,7 +207,7 @@ class LehrkraftApi
      * Verarbeitet geparste Excel-Paste-Daten.
      *
      * Matching-Priorität je Kurs:
-     * 1. Gleicher Kurs, gleiches Datum → Uhrzeit/Dauer/Raum aktualisieren
+     * 1. Gleicher Kurs, gleiches Datum → Uhrzeit/Dauer aktualisieren
      * 2. Gleicher Kurs, kein Datum → Datum + alle Felder setzen
      * 3. Kein Treffer → neu anlegen
      *
@@ -245,8 +242,8 @@ class LehrkraftApi
 
                 if ($vorhandeneId !== false) {
                     $db->prepare(
-                        'UPDATE klausuren SET termin_uhrzeit = ?, dauer_minuten = ?, raum = ? WHERE id = ?'
-                    )->execute([$z['termin_uhrzeit'], $z['dauer_minuten'], $z['raum'], $vorhandeneId]);
+                        'UPDATE klausuren SET termin_uhrzeit = ?, dauer_minuten = ? WHERE id = ?'
+                    )->execute([$z['termin_uhrzeit'], $z['dauer_minuten'], $vorhandeneId]);
                     $aktualisiert++;
                     continue;
                 }
@@ -262,9 +259,9 @@ class LehrkraftApi
             if ($vorhandeneId !== false) {
                 $db->prepare(
                     'UPDATE klausuren
-                     SET termin_datum = ?, termin_uhrzeit = ?, dauer_minuten = ?, raum = ?
+                     SET termin_datum = ?, termin_uhrzeit = ?, dauer_minuten = ?
                      WHERE id = ?'
-                )->execute([$z['termin_datum'], $z['termin_uhrzeit'], $z['dauer_minuten'], $z['raum'], $vorhandeneId]);
+                )->execute([$z['termin_datum'], $z['termin_uhrzeit'], $z['dauer_minuten'], $vorhandeneId]);
                 $aktualisiert++;
                 continue;
             }
@@ -272,9 +269,9 @@ class LehrkraftApi
             // Priorität 3: neu anlegen
             $klausurNr = self::naechsteKlausurNr($db, $kursId);
             $db->prepare(
-                'INSERT INTO klausuren (kurs_id, klausur_nr, termin_datum, termin_uhrzeit, dauer_minuten, raum, erstellt_von)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)'
-            )->execute([$kursId, $klausurNr, $z['termin_datum'], $z['termin_uhrzeit'], $z['dauer_minuten'], $z['raum'], $benutzer['id']]);
+                'INSERT INTO klausuren (kurs_id, klausur_nr, termin_datum, termin_uhrzeit, dauer_minuten, erstellt_von)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            )->execute([$kursId, $klausurNr, $z['termin_datum'], $z['termin_uhrzeit'], $z['dauer_minuten'], $benutzer['id']]);
             $erstellt++;
         }
 
@@ -342,10 +339,10 @@ class LehrkraftApi
         $out = fopen('php://output', 'w');
         fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM für Excel
 
-        fputcsv($out, ['Kurs', 'Anzeigename', 'TN', 'Datum', 'Uhrzeit', 'Dauer', 'Raum'], ';');
+        fputcsv($out, ['Kurs', 'Anzeigename', 'TN', 'Datum', 'Uhrzeit', 'Dauer'], ';');
 
         foreach ($kurse as $k) {
-            fputcsv($out, [$k['kurs_kuerzel'], $k['anzeigename'], $k['anzahl'], '', '', '', ''], ';');
+            fputcsv($out, [$k['kurs_kuerzel'], $k['anzeigename'], $k['anzahl'], '', '', ''], ';');
         }
 
         fclose($out);
@@ -363,7 +360,7 @@ class LehrkraftApi
         $db = Database::getInstance();
 
         $termine = $db->query(
-            'SELECT n.id, n.termin_datum, n.termin_uhrzeit, n.raum, n.bemerkung, n.erstellt_am
+            'SELECT n.id, n.termin_datum, n.termin_uhrzeit, n.bemerkung, n.erstellt_am
              FROM nachschreibtermine n
              ORDER BY n.termin_datum IS NULL, n.termin_datum, n.termin_uhrzeit'
         )->fetchAll();
@@ -439,17 +436,16 @@ class LehrkraftApi
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
-        $datum    = self::validierteDatum($body['termin_datum']    ?? null);
-        $uhrzeit  = self::validierteUhrzeit($body['termin_uhrzeit'] ?? null);
-        $raum     = ($body['raum'] ?? '') !== '' ? trim($body['raum']) : null;
+        $datum     = self::validierteDatum($body['termin_datum']    ?? null);
+        $uhrzeit   = self::validierteUhrzeit($body['termin_uhrzeit'] ?? null);
         $bemerkung = ($body['bemerkung'] ?? '') !== '' ? trim($body['bemerkung']) : null;
 
         $benutzer = Session::getBenutzer();
 
         $db->prepare(
-            'INSERT INTO nachschreibtermine (termin_datum, termin_uhrzeit, raum, bemerkung, erstellt_von)
-             VALUES (?, ?, ?, ?, ?)'
-        )->execute([$datum, $uhrzeit, $raum, $bemerkung, $benutzer['id']]);
+            'INSERT INTO nachschreibtermine (termin_datum, termin_uhrzeit, bemerkung, erstellt_von)
+             VALUES (?, ?, ?, ?)'
+        )->execute([$datum, $uhrzeit, $bemerkung, $benutzer['id']]);
 
         return ['id' => (int) $db->lastInsertId()];
     }
@@ -467,16 +463,15 @@ class LehrkraftApi
             throw new RuntimeException("Nachschreibtermin $id nicht gefunden.");
         }
 
-        $datum    = self::validierteDatum($body['termin_datum']    ?? null);
-        $uhrzeit  = self::validierteUhrzeit($body['termin_uhrzeit'] ?? null);
-        $raum     = ($body['raum'] ?? '') !== '' ? trim($body['raum']) : null;
+        $datum     = self::validierteDatum($body['termin_datum']    ?? null);
+        $uhrzeit   = self::validierteUhrzeit($body['termin_uhrzeit'] ?? null);
         $bemerkung = ($body['bemerkung'] ?? '') !== '' ? trim($body['bemerkung']) : null;
 
         $db->prepare(
             'UPDATE nachschreibtermine
-             SET termin_datum = ?, termin_uhrzeit = ?, raum = ?, bemerkung = ?
+             SET termin_datum = ?, termin_uhrzeit = ?, bemerkung = ?
              WHERE id = ?'
-        )->execute([$datum, $uhrzeit, $raum, $bemerkung, $id]);
+        )->execute([$datum, $uhrzeit, $bemerkung, $id]);
 
         return ['ok' => true];
     }

@@ -60,7 +60,6 @@ class KlausurPasteParser
                 'termin_datum'  => $datum,
                 'termin_uhrzeit'=> $uhrzeit,
                 'dauer_minuten' => $dauer,
-                'raum'          => ($norm['raum'] ?? '') !== '' ? $norm['raum'] : null,
             ];
         }
 
