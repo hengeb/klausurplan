@@ -34,7 +34,7 @@ class AnwesenheitApi
                     b.nachname,
                     a.id                                AS anwesenheit_id,
                     COALESCE(a.status, 'ausstehend')    AS status,
-                    COALESCE(a.entschuldigt, 0)         AS entschuldigt,
+                    a.entschuldigt,
                     a.kommentar
              FROM kurs_schueler ks
              JOIN kurse k          ON k.id  = ks.kurs_id
@@ -63,6 +63,10 @@ class AnwesenheitApi
         self::pruefeKlausurZugriff($db, $klausurId);
 
         $benutzer  = Session::getBenutzer();
+        $rollen    = $benutzer['rollen'] ?? [];
+        $kannEntschuldigen = in_array('admin', $rollen, true)
+                          || in_array('stufenleitung', $rollen, true);
+
         $gespeichert = 0;
         $erlaubteStatus = ['anwesend', 'fehlend', 'ausstehend'];
 
@@ -73,6 +77,15 @@ class AnwesenheitApi
 
             if ($ksId === 0 || !in_array($status, $erlaubteStatus, true)) {
                 continue;
+            }
+
+            // Entschuldigt: null=offen, 1=entschuldigt, 0=unentschuldigt
+            // Nur admin/stufenleitung dürfen dieses Feld setzen
+            $setzeEntschuldigt = $kannEntschuldigen && array_key_exists('entschuldigt', $e);
+            $entschuldigt      = null;
+            if ($setzeEntschuldigt) {
+                $rawEntsch    = $e['entschuldigt'];
+                $entschuldigt = $rawEntsch === null ? null : ((bool) $rawEntsch ? 1 : 0);
             }
 
             // Prüfen ob kurs_schueler zur Klausur gehört
@@ -93,17 +106,33 @@ class AnwesenheitApi
             $aid = $vorhandene->fetchColumn();
 
             if ($aid !== false) {
-                $db->prepare(
-                    'UPDATE anwesenheiten
-                     SET status = ?, kommentar = ?, geaendert_von = ?, geaendert_am = NOW()
-                     WHERE id = ?'
-                )->execute([$status, $kommentar, $benutzer['id'], $aid]);
+                if ($setzeEntschuldigt) {
+                    $db->prepare(
+                        'UPDATE anwesenheiten
+                         SET status = ?, kommentar = ?, entschuldigt = ?, geaendert_von = ?, geaendert_am = NOW()
+                         WHERE id = ?'
+                    )->execute([$status, $kommentar, $entschuldigt, $benutzer['id'], $aid]);
+                } else {
+                    $db->prepare(
+                        'UPDATE anwesenheiten
+                         SET status = ?, kommentar = ?, geaendert_von = ?, geaendert_am = NOW()
+                         WHERE id = ?'
+                    )->execute([$status, $kommentar, $benutzer['id'], $aid]);
+                }
             } else {
-                $db->prepare(
-                    'INSERT INTO anwesenheiten
-                     (klausur_id, kurs_schueler_id, status, kommentar, erfasst_von, erfasst_am)
-                     VALUES (?, ?, ?, ?, ?, NOW())'
-                )->execute([$klausurId, $ksId, $status, $kommentar, $benutzer['id']]);
+                if ($setzeEntschuldigt) {
+                    $db->prepare(
+                        'INSERT INTO anwesenheiten
+                         (klausur_id, kurs_schueler_id, status, kommentar, entschuldigt, erfasst_von, erfasst_am)
+                         VALUES (?, ?, ?, ?, ?, ?, NOW())'
+                    )->execute([$klausurId, $ksId, $status, $kommentar, $entschuldigt, $benutzer['id']]);
+                } else {
+                    $db->prepare(
+                        'INSERT INTO anwesenheiten
+                         (klausur_id, kurs_schueler_id, status, kommentar, erfasst_von, erfasst_am)
+                         VALUES (?, ?, ?, ?, ?, NOW())'
+                    )->execute([$klausurId, $ksId, $status, $kommentar, $benutzer['id']]);
+                }
             }
             $gespeichert++;
         }

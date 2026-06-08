@@ -1091,11 +1091,11 @@ async function zeigeAnwesenheitDialog(klausur) {
             </td>
             ${hatRolle('admin', 'stufenleitung') ? `
             <td>
-                <label class="check-zeile" style="gap:.3rem">
-                    <input type="checkbox" class="aw-entschuldigt" ${e.entschuldigt ? 'checked' : ''}
-                           ${e.status !== 'fehlend' ? 'disabled' : ''}>
-                    Entsch.
-                </label>
+                <select class="aw-entschuldigt" ${e.status !== 'fehlend' ? 'disabled' : ''}>
+                    <option value=""  ${e.entschuldigt === null  ? 'selected' : ''}>Offen</option>
+                    <option value="1" ${e.entschuldigt == 1      ? 'selected' : ''}>Entschuldigt</option>
+                    <option value="0" ${e.entschuldigt == 0 && e.entschuldigt !== null ? 'selected' : ''}>Unentschuldigt</option>
+                </select>
             </td>` : ''}
         </tr>`;
     }).join('');
@@ -1144,12 +1144,13 @@ async function zeigeAnwesenheitDialog(klausur) {
         });
     });
 
-    // Entschuldigt tracken (nur admin/SL)
+    // Entschuldigungsstatus tracken (nur admin/SL)
     if (hatRolle('admin', 'stufenleitung')) {
-        overlay.querySelectorAll('.aw-entschuldigt').forEach(cb => {
-            cb.addEventListener('change', () => {
-                const id = parseInt(cb.closest('.aw-zeile').dataset.id);
-                status[id].entschuldigt = cb.checked;
+        overlay.querySelectorAll('.aw-entschuldigt').forEach(sel => {
+            sel.addEventListener('change', () => {
+                const id = parseInt(sel.closest('.aw-zeile').dataset.id);
+                status[id].entschuldigt = sel.value === '' ? null
+                    : sel.value === '1' ? true : false;
             });
         });
     }
@@ -1167,6 +1168,7 @@ async function zeigeAnwesenheitDialog(klausur) {
             kurs_schueler_id: parseInt(id),
             status:           s.status,
             kommentar:        s.kommentar || '',
+            ...(hatRolle('admin', 'stufenleitung') ? { entschuldigt: s.entschuldigt } : {}),
         }));
 
         try {
@@ -1195,13 +1197,13 @@ function setzeStatus(zeile, neuerStatus, statusObj) {
         }
     });
 
-    // Entschuldigt-Checkbox nur bei 'fehlend' aktiv
-    const entschCb = zeile.querySelector('.aw-entschuldigt');
-    if (entschCb) {
-        entschCb.disabled = neuerStatus !== 'fehlend';
+    // Entschuldigungs-Select nur bei 'fehlend' aktiv
+    const entschSel = zeile.querySelector('.aw-entschuldigt');
+    if (entschSel) {
+        entschSel.disabled = neuerStatus !== 'fehlend';
         if (neuerStatus !== 'fehlend') {
-            entschCb.checked = false;
-            statusObj[id].entschuldigt = false;
+            entschSel.value = '';
+            statusObj[id].entschuldigt = null;
         }
     }
 }
@@ -1485,7 +1487,7 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
 
         return `
         <label class="check-zeile vk-zeile">
-            <input type="checkbox" value="${k.id}" ${bereitsIds.has(k.id) ? 'checked' : ''} style="flex-shrink:0;margin-top:.2rem">
+            <input type="checkbox" value="${k.id}" ${bereitsIds.has(k.id) ? 'checked' : ''}>
             <span class="vk-kursblock">
                 <span class="vk-kursname">${escHtml(k.kurs_anzeigename)}${k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : ''}${meta ? ` <span class="hinweis">– ${meta}</span>` : ''}</span>
                 <span class="vk-nachschreiber">${nsHtml}</span>

@@ -98,6 +98,7 @@ class LehrkraftApi
                  JOIN kurs_schueler ks ON ks.id = a.kurs_schueler_id
                  LEFT JOIN benutzer b  ON b.id  = ks.schueler_id
                  WHERE a.klausur_id IN ($platzhalter) AND a.status = 'fehlend'
+                   AND (a.entschuldigt IS NULL OR a.entschuldigt = 1)
                  ORDER BY COALESCE(b.nachname, ks.name_roh), b.vorname"
             );
             $nsStmt->execute($klausurIds);
@@ -388,6 +389,7 @@ class LehrkraftApi
              JOIN kurse kurs    ON kurs.id = k.kurs_id
              LEFT JOIN anwesenheiten a
                     ON a.klausur_id = k.id AND a.status = \'fehlend\'
+                    AND (a.entschuldigt IS NULL OR a.entschuldigt = 1)
              LEFT JOIN kurs_schueler ks ON ks.id = a.kurs_schueler_id
              LEFT JOIN benutzer b       ON b.id  = ks.schueler_id
              ORDER BY nz.nachschreibtermin_id,

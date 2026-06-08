@@ -578,8 +578,17 @@ main {
     max-height: 380px;
 }
 
-.vk-zeile {
+/* Höhere Spezifität als .check-zeile, damit align-items sicher überschrieben wird */
+.vk-liste .check-zeile {
     align-items: flex-start;
+}
+
+.vk-liste .check-zeile input[type="checkbox"] {
+    flex-shrink: 0;
+    margin-top: .2rem;
+}
+
+.vk-zeile {
     padding: .3rem 0;
 }
 
@@ -640,12 +649,19 @@ main {
 .aw-status-teil  { color: #e67e22; font-weight: 600; font-variant-numeric: tabular-nums; }
 .aw-status-voll  { color: #27ae60; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* Entschuldigt-Markierung bei Nachschreiber*innen */
+/* Entschuldigt-Badge bei Nachschreiber*innen */
 .vk-entsch {
+    display: inline-block;
+    padding: .05rem .4rem;
+    border-radius: 3px;
     font-size: .75rem;
-    font-style: italic;
-    color: #27ae60;
+    font-weight: 600;
+    font-style: normal;
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
     white-space: nowrap;
+    vertical-align: middle;
 }
 
 /* ---------------------------------------------------------------------------
