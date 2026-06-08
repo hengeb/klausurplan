@@ -377,7 +377,7 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
     }
 
     const zeilen = sGomst.map(ks => {
-        const [nachname, vorname] = ks.name_roh.split('|');
+        const nameAnzeige = parseZeigeNameRoh(ks.name_roh);
         const nameRohAttr = escHtml(ks.name_roh);
 
         // Nur Moodle-Konten mit passender Stufe anzeigen
@@ -388,7 +388,7 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
 
         return `
         <tr>
-            <td>${escHtml(nachname)}, ${escHtml(vorname ?? '')}</td>
+            <td>${nameAnzeige}</td>
             <td>${escHtml(ks.stufen)}</td>
             <td>${ks.anzahl_kurse}</td>
             <td>
