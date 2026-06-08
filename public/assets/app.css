@@ -585,7 +585,7 @@ main {
 
 .vk-liste .check-zeile input[type="checkbox"] {
     flex-shrink: 0;
-    margin-top: .2rem;
+    margin-top: .6rem;
 }
 
 .vk-zeile {
@@ -660,6 +660,19 @@ main {
     background: #d4edda;
     color: #155724;
     border: 1px solid #c3e6cb;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+.vk-offen {
+    display: inline-block;
+    padding: .05rem .4rem;
+    border-radius: 3px;
+    font-size: .75rem;
+    font-weight: 600;
+    font-style: normal;
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
     white-space: nowrap;
     vertical-align: middle;
 }

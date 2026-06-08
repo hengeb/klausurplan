@@ -1328,6 +1328,13 @@ function renderNachschreibtermineList(el, termine) {
     });
 }
 
+/** Gibt ein Badge für den Entschuldigungsstatus zurück. */
+function entschuldigungsBadge(entschuldigt) {
+    if (entschuldigt == 1)     return ' <span class="vk-entsch">entsch.</span>';
+    if (entschuldigt === null) return ' <span class="vk-offen">offen</span>';
+    return '';
+}
+
 function renderNachschreibKlausurBlock(k) {
     const ns = k.nachschreiber ?? [];
     let nsHtml = '';
@@ -1336,10 +1343,7 @@ function renderNachschreibKlausurBlock(k) {
             const name = s.nachname
                 ? `${escHtml(s.nachname)}, ${escHtml(s.vorname ?? '')}`
                 : escHtml((s.name_roh ?? '').replace('|', ', '));
-            const entsch = s.entschuldigt == 1
-                ? ' <span class="vk-entsch">entsch.</span>'
-                : '';
-            return `<li>${name}${entsch}</li>`;
+            return `<li>${name}${entschuldigungsBadge(s.entschuldigt)}</li>`;
         }).join('');
         nsHtml = `<ul class="nt-ns-liste">${items}</ul>`;
     }
@@ -1434,10 +1438,7 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
         const name = ns.nachname
             ? `${escHtml(ns.nachname)}, ${escHtml(ns.vorname ?? '')}`
             : escHtml((ns.name_roh ?? '').replace('|', ', '));
-        const entsch = ns.entschuldigt == 1
-            ? ' <span class="vk-entsch">entsch.</span>'
-            : '';
-        return name + entsch;
+        return name + entschuldigungsBadge(ns.entschuldigt);
     }
 
     // Zusammenfassung und Konflikt-Hervorhebungen aktualisieren
