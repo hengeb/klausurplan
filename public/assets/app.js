@@ -531,31 +531,33 @@ async function viewHalbjahre(el) {
                 <span class="accordion-anzahl">${gruppe.stufen.length} Stufe${gruppe.stufen.length !== 1 ? 'n' : ''}</span>
             </button>
             <div class="accordion-body${idx === 0 ? '' : ' versteckt'}">
-                ${gruppe.stufen.map(hj => `
+                ${gruppe.stufen.map(hj => {
+                const hatZugriff = hj.ist_eigene_stufe == 1;
+                const hjLabel    = escHtml(hj.stufe + ', ' + hj.abschnitt + '. HJ ' + hj.schuljahr);
+                const slNamen    = hj.stufenleitungen
+                    ? `<div class="hj-sl-namen">${escHtml(hj.stufenleitungen)}</div>`
+                    : '<div class="hj-sl-namen fehlend">Keine Stufenleitung eingetragen</div>';
+                const buttons = hatZugriff ? `
+                    <button class="btn btn-klein btn-kurs-laden" data-hj-id="${hj.id}">Kurse anzeigen</button>
+                    <button class="btn btn-klein btn-kurs-hinzufuegen"
+                            data-hj-id="${hj.id}" data-hj-label="${hjLabel}">+ Kurs</button>
+                    <button class="btn-icon btn-icon-gefahr btn-hj-loeschen"
+                            data-hj-id="${hj.id}" data-hj-label="${hjLabel}"
+                            title="Löschen">🗑️</button>` : '';
+                return `
                     <div class="hj-block" data-hj-id="${hj.id}">
                         <div class="hj-kopf">
-                            <h4 style="margin:0">${escHtml(hj.stufe)}
-                                <span class="hj-meta">${hj.kurs_anzahl} Kurs(e)</span>
-                            </h4>
-                            <div style="display:flex;gap:.5rem;align-items:center">
-                                <button class="btn btn-klein btn-kurs-laden" data-hj-id="${hj.id}">
-                                    Kurse anzeigen
-                                </button>
-                                ${hatRolle('admin', 'stufenleitung') ? `
-                                <button class="btn btn-klein btn-kurs-hinzufuegen"
-                                        data-hj-id="${hj.id}"
-                                        data-hj-label="${escHtml(hj.stufe + ', ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}">
-                                    + Kurs
-                                </button>` : ''}
-                                <button class="btn-icon btn-icon-gefahr btn-hj-loeschen"
-                                        data-hj-id="${hj.id}"
-                                        data-hj-label="${escHtml(hj.stufe + ', ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}"
-                                        title="Löschen">🗑️</button>
+                            <div>
+                                <h4 style="margin:0">${escHtml(hj.stufe)}
+                                    <span class="hj-meta">${hj.kurs_anzahl} Kurs(e)</span>
+                                </h4>
+                                ${slNamen}
                             </div>
+                            <div style="display:flex;gap:.5rem;align-items:center">${buttons}</div>
                         </div>
                         <div id="kurse-${hj.id}" class="kurs-liste versteckt"></div>
-                    </div>
-                `).join('')}
+                    </div>`;
+            }).join('')}
             </div>
         </div>
     `).join('');
@@ -1179,16 +1181,14 @@ function renderKlausurenUebersicht(el, klausuren, nachschreibtermine = []) {
         </div>
     `).join('');
 
-    // Bearbeiten-Buttons
-    if (hatRolle('admin', 'stufenleitung')) {
-        el.querySelectorAll('.btn-klausur-bearbeiten').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = parseInt(btn.dataset.id);
-                const k  = klausuren.find(x => x.id === id);
-                if (k) zeigeKlausurBearbeitenDialog(k, () => ladeKlausurenUebersicht(el));
-            });
+    // Bearbeiten-Buttons (nur sichtbar wenn ist_eigene_sl)
+    el.querySelectorAll('.btn-klausur-bearbeiten').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const k  = klausuren.find(x => x.id === id);
+            if (k) zeigeKlausurBearbeitenDialog(k, () => ladeKlausurenUebersicht(el));
         });
-    }
+    });
 
     // Anwesenheits-Buttons
     el.querySelectorAll('.btn-anwesenheit').forEach(btn => {
@@ -1291,7 +1291,7 @@ function renderKlausurZeile(k) {
         : `<span class="fehlend">${escHtml(k.lehrer_kuerzel ?? '–')}</span>`;
 
     const aktionen = [];
-    if (hatRolle('admin', 'stufenleitung')) {
+    if (k.ist_eigene_sl == 1) {
         aktionen.push(`<button class="btn-icon btn-klausur-bearbeiten" data-id="${k.id}" title="Bearbeiten">✏️</button>`);
         if (k.lehrer_id) {
             aktionen.push(`<button class="btn-icon btn-email-ausloesen" data-id="${k.id}" title="Anwesenheits-E-Mail senden">✉️</button>`);

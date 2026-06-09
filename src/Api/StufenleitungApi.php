@@ -396,25 +396,56 @@ class StufenleitungApi
         )->fetchAll();
     }
 
-    /** Alle Halbjahre mit Stufeninformationen (für Dropdown/Navigation). */
+    /**
+     * Alle Halbjahre mit Stufeninformationen, Stufenleitungsnamen und eigenem Zugriffsflag.
+     *
+     * ist_eigene_stufe = 1 wenn der aktuelle Nutzer Stufenleitung für diese Stufe ist
+     * (oder Admin, dann wird es in PHP auf 1 gesetzt).
+     * stufenleitungen = semikolongetrennte Liste aller SL-Namen dieser Stufe.
+     */
     public static function getHalbjahre(): array
     {
         Session::requireRolle('admin', 'stufenleitung');
-        $db = Database::getInstance();
+        $db       = Database::getInstance();
+        $benutzer = Session::getBenutzer();
+        $meineId  = $benutzer['id'];
+        $istAdmin = in_array('admin', $benutzer['rollen'] ?? [], true);
 
-        return $db->query(
+        $stmt = $db->prepare(
             "SELECT h.id,
                     h.abschnitt,
                     h.importiert_am,
-                    s.name        AS stufe,
+                    s.name                  AS stufe,
                     s.schuljahr,
-                    COUNT(k.id)   AS kurs_anzahl
+                    COUNT(DISTINCT k.id)    AS kurs_anzahl,
+                    GROUP_CONCAT(
+                        DISTINCT CONCAT(b.nachname, ', ', b.vorname)
+                        ORDER BY b.nachname, b.vorname
+                        SEPARATOR '; '
+                    )                       AS stufenleitungen,
+                    MAX(CASE WHEN sl_ich.benutzer_id IS NOT NULL THEN 1 ELSE 0 END)
+                                            AS ist_eigene_stufe
              FROM halbjahre h
-             JOIN stufen s  ON s.id  = h.stufe_id
-             LEFT JOIN kurse k ON k.halbjahr_id = h.id
-             GROUP BY h.id
+             JOIN stufen s        ON s.id  = h.stufe_id
+             LEFT JOIN kurse k    ON k.halbjahr_id = h.id
+             LEFT JOIN stufenleitungen sl_alle ON sl_alle.stufe_id = s.id
+             LEFT JOIN benutzer b             ON b.id = sl_alle.benutzer_id
+             LEFT JOIN stufenleitungen sl_ich ON sl_ich.stufe_id = s.id
+                                             AND sl_ich.benutzer_id = ?
+             GROUP BY h.id, h.abschnitt, h.importiert_am, s.name, s.schuljahr
              ORDER BY s.schuljahr DESC, s.name, h.abschnitt"
-        )->fetchAll();
+        );
+        $stmt->execute([$meineId]);
+        $rows = $stmt->fetchAll();
+
+        if ($istAdmin) {
+            foreach ($rows as &$row) {
+                $row['ist_eigene_stufe'] = 1;
+            }
+            unset($row);
+        }
+
+        return $rows;
     }
 
     // ------------------------------------------------------------------

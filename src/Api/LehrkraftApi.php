@@ -23,26 +23,36 @@ class LehrkraftApi
     public static function getKlausuren(): array
     {
         Session::requireRolle('admin', 'stufenleitung', 'lehrkraft');
-        $db      = Database::getInstance();
+        $db       = Database::getInstance();
         $benutzer = Session::getBenutzer();
-        $rollen  = $benutzer['rollen'] ?? [];
+        $rollen   = $benutzer['rollen'] ?? [];
+        $meineId  = $benutzer['id'];
 
-        $nurEigene = !in_array('admin', $rollen, true)
-                  && !in_array('stufenleitung', $rollen, true);
+        $istAdmin = in_array('admin', $rollen, true);
+        $istSL    = in_array('stufenleitung', $rollen, true);
 
         $halbjahrId = isset($_GET['halbjahr_id']) ? (int) $_GET['halbjahr_id'] : null;
 
+        // ist_eigene_sl: ob der aktuelle Nutzer Stufenleitung für die Stufe dieser Klausur ist
+        $params = [$meineId]; // erster Param für ist_eigene_sl-Subquery
         $where  = [];
-        $params = [];
-
-        if ($nurEigene) {
-            $where[]  = 'kurs.lehrer_id = ?';
-            $params[] = $benutzer['id'];
-        }
 
         if ($halbjahrId !== null) {
             $where[]  = 'kurs.halbjahr_id = ?';
             $params[] = $halbjahrId;
+        }
+
+        if ($istAdmin) {
+            // kein Zugriffsfilter
+        } elseif ($istSL) {
+            // Eigene Stufen + eigene Kurse als Lehrkraft
+            $where[]  = '(EXISTS (SELECT 1 FROM stufenleitungen sl_f WHERE sl_f.stufe_id = s.id AND sl_f.benutzer_id = ?) OR kurs.lehrer_id = ?)';
+            $params[] = $meineId;
+            $params[] = $meineId;
+        } else {
+            // Reine Lehrkraft
+            $where[]  = 'kurs.lehrer_id = ?';
+            $params[] = $meineId;
         }
 
         $bedingung = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
@@ -68,7 +78,9 @@ class LehrkraftApi
                     lb.kuerzel        AS lehrer_kuerzel,
                     (SELECT COUNT(*) FROM kurs_schueler ks WHERE ks.kurs_id = kurs.id) AS schueler_anzahl,
                     (SELECT COUNT(*) FROM anwesenheiten a
-                     WHERE a.klausur_id = k.id AND a.status != 'ausstehend')          AS anwesenheit_erfasst
+                     WHERE a.klausur_id = k.id AND a.status != 'ausstehend')          AS anwesenheit_erfasst,
+                    EXISTS (SELECT 1 FROM stufenleitungen sl_e
+                            WHERE sl_e.stufe_id = s.id AND sl_e.benutzer_id = ?)      AS ist_eigene_sl
              FROM klausuren k
              JOIN kurse kurs  ON kurs.id = k.kurs_id
              JOIN halbjahre h ON h.id    = kurs.halbjahr_id
@@ -79,6 +91,13 @@ class LehrkraftApi
         );
         $stmt->execute($params);
         $klausuren = $stmt->fetchAll();
+
+        if ($istAdmin) {
+            foreach ($klausuren as &$k) {
+                $k['ist_eigene_sl'] = 1;
+            }
+            unset($k);
+        }
 
         // Optionaler Parameter: fehlende Schüler*innen je Klausur anhängen
         if (isset($_GET['nachschreiber']) && !empty($klausuren)) {
@@ -282,28 +301,48 @@ class LehrkraftApi
     // Kursliste (für Dropdown bei Direktanlage) + Vorlage-Download
     // ------------------------------------------------------------------
 
-    /** Kurse des aktuellen (neuesten) Halbjahres für das Direktanlage-Formular. */
+    /**
+     * Kurse für das Direktanlage-Formular.
+     * Admin: aktuelles (neuestes) Halbjahr.
+     * Stufenleitung: alle Kurse aus eigenen Stufen, neueste zuerst.
+     */
     public static function getKurse(): array
     {
         Session::requireRolle('admin', 'stufenleitung');
-        $db          = Database::getInstance();
-        $halbjahrIds = self::aktuelleHalbjahrIds($db);
+        $db       = Database::getInstance();
+        $benutzer = Session::getBenutzer();
+        $istAdmin = in_array('admin', $benutzer['rollen'] ?? [], true);
 
-        if (empty($halbjahrIds)) {
-            return [];
+        if ($istAdmin) {
+            $halbjahrIds = self::aktuelleHalbjahrIds($db);
+            if (empty($halbjahrIds)) {
+                return [];
+            }
+            $platzhalter = implode(',', array_fill(0, count($halbjahrIds), '?'));
+            $stmt = $db->prepare(
+                "SELECT k.id, k.kurs_kuerzel, k.anzeigename, k.kursart,
+                        s.name AS stufe, s.schuljahr, h.abschnitt, h.id AS halbjahr_id
+                 FROM kurse k
+                 JOIN halbjahre h ON h.id = k.halbjahr_id
+                 JOIN stufen s    ON s.id = h.stufe_id
+                 WHERE k.halbjahr_id IN ($platzhalter)
+                 ORDER BY s.schuljahr DESC, h.abschnitt DESC, s.name, k.anzeigename"
+            );
+            $stmt->execute($halbjahrIds);
+        } else {
+            // Stufenleitung: alle Kurse aus eigenen Stufen, neueste zuerst
+            $stmt = $db->prepare(
+                "SELECT k.id, k.kurs_kuerzel, k.anzeigename, k.kursart,
+                        s.name AS stufe, s.schuljahr, h.abschnitt, h.id AS halbjahr_id
+                 FROM kurse k
+                 JOIN halbjahre h ON h.id = k.halbjahr_id
+                 JOIN stufen s    ON s.id = h.stufe_id
+                 JOIN stufenleitungen sl ON sl.stufe_id = s.id AND sl.benutzer_id = ?
+                 ORDER BY s.schuljahr DESC, h.abschnitt DESC, s.name, k.anzeigename"
+            );
+            $stmt->execute([$benutzer['id']]);
         }
 
-        $platzhalter = implode(',', array_fill(0, count($halbjahrIds), '?'));
-        $stmt = $db->prepare(
-            "SELECT k.id, k.kurs_kuerzel, k.anzeigename, k.kursart,
-                    s.name AS stufe, s.schuljahr, h.abschnitt, h.id AS halbjahr_id
-             FROM kurse k
-             JOIN halbjahre h ON h.id = k.halbjahr_id
-             JOIN stufen s    ON s.id = h.stufe_id
-             WHERE k.halbjahr_id IN ($platzhalter)
-             ORDER BY k.anzeigename"
-        );
-        $stmt->execute($halbjahrIds);
         return $stmt->fetchAll();
     }
 
