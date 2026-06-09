@@ -542,7 +542,10 @@ async function viewHalbjahre(el) {
             </div>
         `).join('');
 
-    el.innerHTML = `<h2>Halbjahre & Kurse</h2><div class="accordion">${accordion}</div>`;
+    const addKursBtn = hatRolle('admin', 'stufenleitung')
+        ? `<div style="margin-top:1.5rem"><button class="btn btn-sekundaer" id="btn-kurs-global-hinzufuegen">+ Kurs hinzufügen</button></div>`
+        : '';
+    el.innerHTML = `<h2>Halbjahre & Kurse</h2><div class="accordion">${accordion}</div>${addKursBtn}`;
 
     // Accordion
     el.querySelectorAll('.accordion-kopf').forEach(btn => {
@@ -567,7 +570,7 @@ async function viewHalbjahre(el) {
             btn.textContent = 'Wird geladen…';
             try {
                 const kurse = await apiFetch(`/stufenleitung/halbjahre/${hjId}/kurse`);
-                ziel.innerHTML = renderKursTabelle(kurse) + renderKursAddFormHTML(hjId);
+                ziel.innerHTML = renderKursTabelle(kurse);
                 ziel.classList.remove('versteckt');
                 btn.remove();
 
@@ -599,38 +602,6 @@ async function viewHalbjahre(el) {
                         }
                     }
                 });
-
-                // Kurs manuell hinzufügen
-                const form = ziel.querySelector('.kurs-add-form');
-                if (form) {
-                    form.addEventListener('submit', async ev => {
-                        ev.preventDefault();
-                        const bezeichnung    = form.querySelector('[name="bezeichnung"]').value.trim();
-                        const kursart        = form.querySelector('[name="kursart"]').value;
-                        const lehrerKuerzel  = form.querySelector('[name="lehrer_kuerzel"]').value.trim() || null;
-                        if (!bezeichnung) return;
-
-                        const submitBtn = form.querySelector('[type="submit"]');
-                        submitBtn.disabled = true;
-                        submitBtn.textContent = 'Wird gespeichert…';
-                        try {
-                            const neuerKurs = await apiFetch(`/stufenleitung/halbjahre/${hjId}/kurse`, {
-                                method: 'POST',
-                                body: JSON.stringify({ bezeichnung, kursart, lehrer_kuerzel: lehrerKuerzel }),
-                            });
-                            const tbody = ziel.querySelector('tbody');
-                            tbody.querySelector('tr td[colspan]')?.closest('tr')?.remove();
-                            tbody.insertAdjacentHTML('beforeend', renderKursZeile(neuerKurs));
-                            form.reset();
-                            form.querySelector('[name="bezeichnung"]').focus();
-                        } catch (err) {
-                            alert(`Fehler: ${err.message}`);
-                        } finally {
-                            submitBtn.disabled = false;
-                            submitBtn.textContent = 'Hinzufügen';
-                        }
-                    });
-                }
             } catch (err) {
                 btn.disabled = false;
                 btn.textContent = 'Kurse anzeigen';
@@ -638,6 +609,11 @@ async function viewHalbjahre(el) {
                 ziel.classList.remove('versteckt');
             }
         });
+    });
+
+    // Kurs global hinzufügen
+    el.querySelector('#btn-kurs-global-hinzufuegen')?.addEventListener('click', () => {
+        zeigeKursHinzufuegenDialog(halbjahre, el);
     });
 
     // Halbjahr löschen
@@ -659,18 +635,99 @@ async function viewHalbjahre(el) {
     });
 }
 
-function renderKursAddFormHTML(hjId) {
-    if (!hatRolle('admin', 'stufenleitung')) return '';
-    return `
-    <form class="kurs-add-form" data-hj-id="${hjId}" style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <input type="text" name="bezeichnung" placeholder="Kursbezeichnung (z.B. SP_Q2_GK1_SZ)" required maxlength="50" style="flex:2;min-width:200px">
-        <select name="kursart">
-            <option value="GK">GK</option>
-            <option value="LK">LK</option>
-        </select>
-        <input type="text" name="lehrer_kuerzel" placeholder="Kürzel Lehrkraft" maxlength="20" style="width:9rem">
-        <button type="submit" class="btn btn-klein">Hinzufügen</button>
-    </form>`;
+async function zeigeKursHinzufuegenDialog(halbjahre, viewEl) {
+    let lehrkraefte = [];
+    try { lehrkraefte = await apiFetch('/stufenleitung/lehrkraefte'); } catch {}
+
+    const hjOptionen = halbjahre.map(hj =>
+        `<option value="${hj.id}">${escHtml(hj.stufe)} – ${hj.abschnitt}. HJ ${escHtml(hj.schuljahr)}</option>`
+    ).join('');
+    const lkOptionen = `<option value="">– keine –</option>` + lehrkraefte.map(lk =>
+        `<option value="${lk.id}">${escHtml(lk.nachname)}, ${escHtml(lk.vorname)}${lk.kuerzel ? ' (' + escHtml(lk.kuerzel) + ')' : ''}</option>`
+    ).join('');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+        <div class="dialog">
+            <h3>Kurs hinzufügen</h3>
+            <div class="formular-gruppe">
+                <label>Halbjahr</label>
+                <select id="dlg-hj-id">${hjOptionen}</select>
+            </div>
+            <div class="formular-gruppe">
+                <label>Kursbezeichnung</label>
+                <input type="text" id="dlg-kurs-bezeichnung" placeholder="z.B. SP_Q2_GK1_SZ" maxlength="50">
+            </div>
+            <div class="formular-gruppe">
+                <label>Kursart</label>
+                <select id="dlg-kursart">
+                    <option value="GK">GK</option>
+                    <option value="LK">LK</option>
+                </select>
+            </div>
+            <div class="formular-gruppe">
+                <label>Lehrkraft</label>
+                <select id="dlg-lk-id">${lkOptionen}</select>
+            </div>
+            <div class="dialog-aktionen">
+                <button class="btn" id="dlg-kurs-speichern">Hinzufügen</button>
+                <button class="btn btn-sekundaer" id="dlg-kurs-abbrechen">Abbrechen</button>
+            </div>
+            <p id="dlg-kurs-fehler" class="fehler" style="display:none"></p>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#dlg-kurs-abbrechen').addEventListener('click', () => overlay.remove());
+    schliessbar(overlay);
+
+    overlay.querySelector('#dlg-kurs-speichern').addEventListener('click', async () => {
+        const btn       = overlay.querySelector('#dlg-kurs-speichern');
+        const fehlerEl  = overlay.querySelector('#dlg-kurs-fehler');
+        const hjId      = parseInt(overlay.querySelector('#dlg-hj-id').value);
+        const bezeichnung = overlay.querySelector('#dlg-kurs-bezeichnung').value.trim();
+        const kursart   = overlay.querySelector('#dlg-kursart').value;
+        const lehrerId  = parseInt(overlay.querySelector('#dlg-lk-id').value) || null;
+
+        if (!bezeichnung) {
+            fehlerEl.textContent = 'Bitte eine Kursbezeichnung eingeben.';
+            fehlerEl.style.display = '';
+            return;
+        }
+
+        btn.disabled = true;
+        fehlerEl.style.display = 'none';
+        try {
+            const neuerKurs = await apiFetch(`/stufenleitung/halbjahre/${hjId}/kurse`, {
+                method: 'POST',
+                body: JSON.stringify({ bezeichnung, kursart, lehrer_id: lehrerId }),
+            });
+
+            // Kurs in sichtbare Kursliste einfügen, falls bereits geladen
+            const ziel = viewEl.querySelector(`#kurse-${hjId}`);
+            if (ziel && !ziel.classList.contains('versteckt')) {
+                const tbody = ziel.querySelector('tbody');
+                if (tbody) {
+                    tbody.querySelector('tr td[colspan]')?.closest('tr')?.remove();
+                    tbody.insertAdjacentHTML('beforeend', renderKursZeile(neuerKurs));
+                }
+            }
+
+            // Kurs-Anzahl im Halbjahr-Kopf aktualisieren
+            const hjBlock = viewEl.querySelector(`.hj-block[data-hj-id="${hjId}"]`);
+            const meta = hjBlock?.querySelector('.hj-meta');
+            if (meta) {
+                const n = (parseInt(meta.textContent) || 0) + 1;
+                meta.textContent = `${n} Kurs(e)`;
+            }
+
+            overlay.remove();
+        } catch (err) {
+            fehlerEl.textContent = err.message;
+            fehlerEl.style.display = '';
+            btn.disabled = false;
+        }
+    });
 }
 
 function renderKursZeile(k) {

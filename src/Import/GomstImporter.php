@@ -163,7 +163,49 @@ class GomstImporter
         }
 
         $this->db->prepare('INSERT INTO stufen (name, schuljahr) VALUES (?, ?)')->execute([$name, $schuljahr]);
-        return (int) $this->db->lastInsertId();
+        $neueId = (int) $this->db->lastInsertId();
+        $this->autoForwardStufenleitung($neueId, $name, $schuljahr);
+        return $neueId;
+    }
+
+    /**
+     * Überträgt Stufenleitungen automatisch auf eine neue Stufe.
+     * Reihenfolge: EF → Q1 → Q2 → EF → …
+     * Vorgänger ist immer die vorherige Stufe im vorherigen Schuljahr.
+     */
+    private function autoForwardStufenleitung(int $neueStufeId, string $name, string $schuljahr): void
+    {
+        static $vorgaengerMap = ['EF' => 'Q2', 'Q1' => 'EF', 'Q2' => 'Q1'];
+        $vorgaengerName = $vorgaengerMap[$name] ?? null;
+        if ($vorgaengerName === null) {
+            return;
+        }
+
+        [$startJahr, $endJahr] = explode('/', $schuljahr, 2);
+        $vorgaengerSchuljahr = ((int) $startJahr - 1) . '/' . ((int) $endJahr - 1);
+
+        $stmt = $this->db->prepare('SELECT id FROM stufen WHERE name = ? AND schuljahr = ?');
+        $stmt->execute([$vorgaengerName, $vorgaengerSchuljahr]);
+        $vorgaengerStufeId = $stmt->fetchColumn();
+        if ($vorgaengerStufeId === false) {
+            return;
+        }
+
+        // Nur Personen übernehmen, die noch die Stufenleitung-Rolle haben
+        $stmt = $this->db->prepare(
+            'SELECT sl.benutzer_id
+             FROM stufenleitungen sl
+             JOIN rollen r ON r.benutzer_id = sl.benutzer_id AND r.rolle = \'stufenleitung\'
+             WHERE sl.stufe_id = ?'
+        );
+        $stmt->execute([(int) $vorgaengerStufeId]);
+
+        $ins = $this->db->prepare(
+            'INSERT IGNORE INTO stufenleitungen (benutzer_id, stufe_id) VALUES (?, ?)'
+        );
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $benutzerId) {
+            $ins->execute([$benutzerId, $neueStufeId]);
+        }
     }
 
     private function findeOderLegeAnHalbjahr(int $stufeId, int $abschnitt): int

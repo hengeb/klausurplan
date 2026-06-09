@@ -127,6 +127,10 @@ $router->post('/stufenleitung/zuordnungen', function (): array {
 // ------------------------------------------------------------------
 // Stufenleitung – Halbjahre & Kurse
 // ------------------------------------------------------------------
+$router->get('/stufenleitung/lehrkraefte', function (): array {
+    return StufenleitungApi::getLehrkraefte();
+}, 'admin', 'stufenleitung');
+
 $router->get('/stufenleitung/halbjahre', function (): array {
     return StufenleitungApi::getHalbjahre();
 }, 'admin', 'stufenleitung');

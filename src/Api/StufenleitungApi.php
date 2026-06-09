@@ -180,6 +180,20 @@ class StufenleitungApi
     // Halbjahre und Kurse für die Übersicht
     // ------------------------------------------------------------------
 
+    /** Alle Lehrkräfte (für Dropdowns). */
+    public static function getLehrkraefte(): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        return $db->query(
+            "SELECT b.id, b.vorname, b.nachname, b.kuerzel
+             FROM benutzer b
+             JOIN rollen r ON r.benutzer_id = b.id AND r.rolle = 'lehrkraft'
+             ORDER BY b.nachname, b.vorname"
+        )->fetchAll();
+    }
+
     /** Alle Halbjahre mit Stufeninformationen (für Dropdown/Navigation). */
     public static function getHalbjahre(): array
     {
@@ -481,6 +495,8 @@ class StufenleitungApi
         $kursart       = $body['kursart'] ?? 'GK';
         $fachKuerzel   = strtoupper(trim($body['fach_kuerzel'] ?? ''));
         $lehrerKuerzel = strtoupper(trim($body['lehrer_kuerzel'] ?? '')) ?: null;
+        $lehrerIdDirekt = isset($body['lehrer_id']) && (int) $body['lehrer_id'] > 0
+            ? (int) $body['lehrer_id'] : null;
 
         if ($bezeichnung === '') {
             http_response_code(400);
@@ -513,11 +529,21 @@ class StufenleitungApi
             throw new RuntimeException('Ein Kurs mit dieser Bezeichnung existiert bereits in diesem Halbjahr.');
         }
 
-        // Lehrerkürzel zu benutzer_id auflösen
-        $lehrerId      = null;
-        $lehrerVorname = null;
+        // Lehrkraft auflösen: direkte ID hat Vorrang vor Kürzel
+        $lehrerId       = null;
+        $lehrerVorname  = null;
         $lehrerNachname = null;
-        if ($lehrerKuerzel !== null) {
+        if ($lehrerIdDirekt !== null) {
+            $ls = $db->prepare('SELECT id, vorname, nachname, kuerzel FROM benutzer WHERE id = ?');
+            $ls->execute([$lehrerIdDirekt]);
+            $lehrer = $ls->fetch();
+            if ($lehrer !== false) {
+                $lehrerId       = (int) $lehrer['id'];
+                $lehrerVorname  = $lehrer['vorname'];
+                $lehrerNachname = $lehrer['nachname'];
+                $lehrerKuerzel  = $lehrer['kuerzel'] ?? $lehrerKuerzel;
+            }
+        } elseif ($lehrerKuerzel !== null) {
             $ls = $db->prepare(
                 'SELECT b.id, b.vorname, b.nachname
                  FROM benutzer b
