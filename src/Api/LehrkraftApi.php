@@ -311,9 +311,22 @@ class LehrkraftApi
         Session::requireRolle('admin', 'stufenleitung');
         $db       = Database::getInstance();
         $benutzer = Session::getBenutzer();
-        $istAdmin = in_array('admin', $benutzer['rollen'] ?? [], true);
 
-        if ($istAdmin) {
+        // Kurse aus eigenen Stufen (SL-Filter), neueste zuerst
+        $stmt = $db->prepare(
+            "SELECT k.id, k.kurs_kuerzel, k.anzeigename, k.kursart,
+                    s.name AS stufe, s.schuljahr, h.abschnitt, h.id AS halbjahr_id
+             FROM kurse k
+             JOIN halbjahre h ON h.id = k.halbjahr_id
+             JOIN stufen s    ON s.id = h.stufe_id
+             JOIN stufenleitungen sl ON sl.stufe_id = s.id AND sl.benutzer_id = ?
+             ORDER BY s.schuljahr DESC, h.abschnitt DESC, s.name, k.anzeigename"
+        );
+        $stmt->execute([$benutzer['id']]);
+        $kurse = $stmt->fetchAll();
+
+        // Admin ohne SL-Zuordnung: Fallback auf aktuelles Halbjahr
+        if (empty($kurse) && in_array('admin', $benutzer['rollen'] ?? [], true)) {
             $halbjahrIds = self::aktuelleHalbjahrIds($db);
             if (empty($halbjahrIds)) {
                 return [];
@@ -329,21 +342,10 @@ class LehrkraftApi
                  ORDER BY s.schuljahr DESC, h.abschnitt DESC, s.name, k.anzeigename"
             );
             $stmt->execute($halbjahrIds);
-        } else {
-            // Stufenleitung: alle Kurse aus eigenen Stufen, neueste zuerst
-            $stmt = $db->prepare(
-                "SELECT k.id, k.kurs_kuerzel, k.anzeigename, k.kursart,
-                        s.name AS stufe, s.schuljahr, h.abschnitt, h.id AS halbjahr_id
-                 FROM kurse k
-                 JOIN halbjahre h ON h.id = k.halbjahr_id
-                 JOIN stufen s    ON s.id = h.stufe_id
-                 JOIN stufenleitungen sl ON sl.stufe_id = s.id AND sl.benutzer_id = ?
-                 ORDER BY s.schuljahr DESC, h.abschnitt DESC, s.name, k.anzeigename"
-            );
-            $stmt->execute([$benutzer['id']]);
+            return $stmt->fetchAll();
         }
 
-        return $stmt->fetchAll();
+        return $kurse;
     }
 
     /**

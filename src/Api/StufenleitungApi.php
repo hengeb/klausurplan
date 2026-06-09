@@ -846,14 +846,22 @@ class StufenleitungApi
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
-        $stmt = $db->prepare('SELECT id FROM halbjahre WHERE id = ?');
+        $stmt = $db->prepare('SELECT stufe_id FROM halbjahre WHERE id = ?');
         $stmt->execute([$halbjahrId]);
-        if ($stmt->fetchColumn() === false) {
+        $stufeId = $stmt->fetchColumn();
+        if ($stufeId === false) {
             http_response_code(404);
             throw new RuntimeException("Halbjahr {$halbjahrId} nicht gefunden.");
         }
 
         $db->prepare('DELETE FROM halbjahre WHERE id = ?')->execute([$halbjahrId]);
+
+        // Stufe löschen wenn keine Halbjahre mehr → kaskadiert stufenleitungen
+        $remaining = $db->prepare('SELECT COUNT(*) FROM halbjahre WHERE stufe_id = ?');
+        $remaining->execute([$stufeId]);
+        if ((int) $remaining->fetchColumn() === 0) {
+            $db->prepare('DELETE FROM stufen WHERE id = ?')->execute([$stufeId]);
+        }
 
         return ['ok' => true];
     }
