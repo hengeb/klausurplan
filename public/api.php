@@ -135,6 +135,10 @@ $router->get('/stufenleitung/halbjahre', function (): array {
     return StufenleitungApi::getHalbjahre();
 }, 'admin', 'stufenleitung');
 
+$router->post('/stufenleitung/halbjahre', function (): array {
+    return StufenleitungApi::addHalbjahr(Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
 $router->get('/stufenleitung/halbjahre/{id}/kurse', function (array $p): array {
     return StufenleitungApi::getKurse((int) $p['id']);
 }, 'admin', 'stufenleitung');

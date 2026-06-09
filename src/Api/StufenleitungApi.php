@@ -180,6 +180,104 @@ class StufenleitungApi
     // Halbjahre und Kurse für die Übersicht
     // ------------------------------------------------------------------
 
+    /**
+     * Legt ein neues Halbjahr (und bei Bedarf die Stufe) manuell an.
+     *
+     * Body: { stufe_name: string, schuljahr: string, abschnitt: 1|2 }
+     */
+    public static function addHalbjahr(array $body): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stufeName = strtoupper(trim($body['stufe_name'] ?? ''));
+        $schuljahr = trim($body['schuljahr'] ?? '');
+        $abschnitt = (int) ($body['abschnitt'] ?? 0);
+
+        if ($stufeName === '') {
+            http_response_code(400);
+            throw new RuntimeException('Stufe darf nicht leer sein.');
+        }
+        if (!preg_match('/^\d{4}\/\d{4}$/', $schuljahr)) {
+            http_response_code(400);
+            throw new RuntimeException('Schuljahr muss im Format JJJJ/JJJJ angegeben werden (z.B. 2024/2025).');
+        }
+        if (!in_array($abschnitt, [1, 2], true)) {
+            http_response_code(400);
+            throw new RuntimeException('Abschnitt muss 1 oder 2 sein.');
+        }
+
+        // Stufe anlegen oder finden
+        $stmt = $db->prepare('SELECT id FROM stufen WHERE name = ? AND schuljahr = ?');
+        $stmt->execute([$stufeName, $schuljahr]);
+        $stufeId  = $stmt->fetchColumn();
+        $neueStufe = $stufeId === false;
+        if ($neueStufe) {
+            $db->prepare('INSERT INTO stufen (name, schuljahr) VALUES (?, ?)')->execute([$stufeName, $schuljahr]);
+            $stufeId = (int) $db->lastInsertId();
+        }
+
+        // Halbjahr darf nicht bereits existieren
+        $stmt = $db->prepare('SELECT id FROM halbjahre WHERE stufe_id = ? AND abschnitt = ?');
+        $stmt->execute([$stufeId, $abschnitt]);
+        if ($stmt->fetchColumn() !== false) {
+            http_response_code(409);
+            throw new RuntimeException(
+                "{$stufeName} – {$abschnitt}. Halbjahr {$schuljahr} existiert bereits."
+            );
+        }
+
+        $benutzer = Session::getBenutzer();
+        $db->prepare(
+            'INSERT INTO halbjahre (stufe_id, abschnitt, importiert_von) VALUES (?, ?, ?)'
+        )->execute([$stufeId, $abschnitt, $benutzer['id']]);
+        $halbjahrId = (int) $db->lastInsertId();
+
+        if ($neueStufe) {
+            self::autoForwardStufenleitung($stufeId, $stufeName, $schuljahr, $db);
+        }
+
+        return [
+            'id'          => $halbjahrId,
+            'stufe'       => $stufeName,
+            'schuljahr'   => $schuljahr,
+            'abschnitt'   => $abschnitt,
+            'kurs_anzahl' => 0,
+        ];
+    }
+
+    /** Überträgt Stufenleitungen auf eine neue Stufe (EF→Q2, Q1→EF, Q2→Q1 im Vorjahr). */
+    private static function autoForwardStufenleitung(int $neueStufeId, string $name, string $schuljahr, \PDO $db): void
+    {
+        static $vorgaengerMap = ['EF' => 'Q2', 'Q1' => 'EF', 'Q2' => 'Q1'];
+        $vorgaengerName = $vorgaengerMap[$name] ?? null;
+        if ($vorgaengerName === null) {
+            return;
+        }
+
+        [$start, $end] = explode('/', $schuljahr, 2);
+        $vorgaengerSchuljahr = ((int) $start - 1) . '/' . ((int) $end - 1);
+
+        $stmt = $db->prepare('SELECT id FROM stufen WHERE name = ? AND schuljahr = ?');
+        $stmt->execute([$vorgaengerName, $vorgaengerSchuljahr]);
+        $vorgaengerStufeId = $stmt->fetchColumn();
+        if ($vorgaengerStufeId === false) {
+            return;
+        }
+
+        $stmt = $db->prepare(
+            'SELECT sl.benutzer_id FROM stufenleitungen sl
+             JOIN rollen r ON r.benutzer_id = sl.benutzer_id AND r.rolle = \'stufenleitung\'
+             WHERE sl.stufe_id = ?'
+        );
+        $stmt->execute([(int) $vorgaengerStufeId]);
+
+        $ins = $db->prepare('INSERT IGNORE INTO stufenleitungen (benutzer_id, stufe_id) VALUES (?, ?)');
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $benutzerId) {
+            $ins->execute([$benutzerId, $neueStufeId]);
+        }
+    }
+
     /** Alle Lehrkräfte (für Dropdowns). */
     public static function getLehrkraefte(): array
     {

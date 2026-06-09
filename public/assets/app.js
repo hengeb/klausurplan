@@ -542,10 +542,12 @@ async function viewHalbjahre(el) {
             </div>
         `).join('');
 
-    const addKursBtn = hatRolle('admin', 'stufenleitung')
-        ? `<div style="margin-top:1.5rem"><button class="btn btn-sekundaer" id="btn-kurs-global-hinzufuegen">+ Kurs hinzufügen</button></div>`
-        : '';
-    el.innerHTML = `<h2>Halbjahre & Kurse</h2><div class="accordion">${accordion}</div>${addKursBtn}`;
+    const aktionenLeiste = hatRolle('admin', 'stufenleitung') ? `
+        <div style="margin-top:1.5rem;display:flex;gap:.5rem;flex-wrap:wrap">
+            <button class="btn btn-sekundaer" id="btn-hj-anlegen">+ Halbjahr anlegen</button>
+            <button class="btn btn-sekundaer" id="btn-kurs-global-hinzufuegen">+ Kurs hinzufügen</button>
+        </div>` : '';
+    el.innerHTML = `<h2>Halbjahre & Kurse</h2><div class="accordion">${accordion}</div>${aktionenLeiste}`;
 
     // Accordion
     el.querySelectorAll('.accordion-kopf').forEach(btn => {
@@ -611,9 +613,14 @@ async function viewHalbjahre(el) {
         });
     });
 
-    // Kurs global hinzufügen
+    // Halbjahr anlegen
+    el.querySelector('#btn-hj-anlegen')?.addEventListener('click', () => {
+        zeigeHalbjahrAnlegenDialog(el);
+    });
+
+    // Kurs global hinzufügen (lädt halbjahre frisch beim Öffnen)
     el.querySelector('#btn-kurs-global-hinzufuegen')?.addEventListener('click', () => {
-        zeigeKursHinzufuegenDialog(halbjahre, el);
+        zeigeKursHinzufuegenDialog(el);
     });
 
     // Halbjahr löschen
@@ -635,16 +642,95 @@ async function viewHalbjahre(el) {
     });
 }
 
-async function zeigeKursHinzufuegenDialog(halbjahre, viewEl) {
-    let lehrkraefte = [];
-    try { lehrkraefte = await apiFetch('/stufenleitung/lehrkraefte'); } catch {}
+async function zeigeHalbjahrAnlegenDialog(el) {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+        <div class="dialog">
+            <h3>Halbjahr anlegen</h3>
+            <div class="formular-gruppe">
+                <label>Stufe</label>
+                <input type="text" id="dlg-hj-stufe" placeholder="z.B. EF, Q1, Q2"
+                       list="dlg-stufen-list" maxlength="20" autocomplete="off">
+                <datalist id="dlg-stufen-list">
+                    <option value="EF"><option value="Q1"><option value="Q2">
+                </datalist>
+            </div>
+            <div class="formular-gruppe">
+                <label>Schuljahr</label>
+                <input type="text" id="dlg-hj-schuljahr" placeholder="z.B. 2024/2025" maxlength="9">
+            </div>
+            <div class="formular-gruppe">
+                <label>Halbjahr</label>
+                <select id="dlg-hj-abschnitt">
+                    <option value="1">1. Halbjahr</option>
+                    <option value="2">2. Halbjahr</option>
+                </select>
+            </div>
+            <div class="dialog-aktionen">
+                <button class="btn" id="dlg-hj-speichern">Anlegen</button>
+                <button class="btn btn-sekundaer" id="dlg-hj-abbrechen">Abbrechen</button>
+            </div>
+            <p id="dlg-hj-fehler" class="fehler" style="display:none"></p>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#dlg-hj-stufe').focus();
+
+    overlay.querySelector('#dlg-hj-abbrechen').addEventListener('click', () => overlay.remove());
+    schliessbar(overlay);
+
+    overlay.querySelector('#dlg-hj-speichern').addEventListener('click', async () => {
+        const btn      = overlay.querySelector('#dlg-hj-speichern');
+        const fehlerEl = overlay.querySelector('#dlg-hj-fehler');
+        const stufe    = overlay.querySelector('#dlg-hj-stufe').value.trim().toUpperCase();
+        const schuljahr = overlay.querySelector('#dlg-hj-schuljahr').value.trim();
+        const abschnitt = parseInt(overlay.querySelector('#dlg-hj-abschnitt').value);
+
+        if (!stufe) {
+            fehlerEl.textContent = 'Bitte eine Stufe eingeben.';
+            fehlerEl.style.display = '';
+            return;
+        }
+        if (!schuljahr) {
+            fehlerEl.textContent = 'Bitte ein Schuljahr eingeben.';
+            fehlerEl.style.display = '';
+            return;
+        }
+
+        btn.disabled = true;
+        fehlerEl.style.display = 'none';
+        try {
+            await apiFetch('/stufenleitung/halbjahre', {
+                method: 'POST',
+                body: JSON.stringify({ stufe_name: stufe, schuljahr, abschnitt }),
+            });
+            overlay.remove();
+            viewHalbjahre(el);
+        } catch (err) {
+            fehlerEl.textContent = err.message;
+            fehlerEl.style.display = '';
+            btn.disabled = false;
+        }
+    });
+}
+
+async function zeigeKursHinzufuegenDialog(viewEl) {
+    let halbjahre = [], lehrkraefte = [];
+    try {
+        [halbjahre, lehrkraefte] = await Promise.all([
+            apiFetch('/stufenleitung/halbjahre'),
+            apiFetch('/stufenleitung/lehrkraefte'),
+        ]);
+    } catch {}
 
     const hjOptionen = halbjahre.map(hj =>
         `<option value="${hj.id}">${escHtml(hj.stufe)} – ${hj.abschnitt}. HJ ${escHtml(hj.schuljahr)}</option>`
     ).join('');
-    const lkOptionen = `<option value="">– keine –</option>` + lehrkraefte.map(lk =>
-        `<option value="${lk.id}">${escHtml(lk.nachname)}, ${escHtml(lk.vorname)}${lk.kuerzel ? ' (' + escHtml(lk.kuerzel) + ')' : ''}</option>`
-    ).join('');
+    const lkOptionen = `<option value="">– keine –</option>` + lehrkraefte.map(lk => {
+        const nachname = lk.nachname.replace(/\s*\([^)]+\)$/, '');
+        const kuerzel  = lk.kuerzel ? ` (${escHtml(lk.kuerzel)})` : '';
+        return `<option value="${lk.id}">${escHtml(nachname)}, ${escHtml(lk.vorname)}${kuerzel}</option>`;
+    }).join('');
 
     const overlay = document.createElement('div');
     overlay.className = 'dialog-overlay';
@@ -652,7 +738,7 @@ async function zeigeKursHinzufuegenDialog(halbjahre, viewEl) {
         <div class="dialog">
             <h3>Kurs hinzufügen</h3>
             <div class="formular-gruppe">
-                <label>Halbjahr</label>
+                <label>Stufe</label>
                 <select id="dlg-hj-id">${hjOptionen}</select>
             </div>
             <div class="formular-gruppe">
@@ -1460,7 +1546,7 @@ async function zeigeAnwesenheitDialog(klausur) {
         status[e.kurs_schueler_id] = {
             status:       e.status,
             kommentar:    e.kommentar ?? '',
-            entschuldigt: !!e.entschuldigt,
+            entschuldigt: e.entschuldigt == null ? null : !!e.entschuldigt,
         };
     }
 
