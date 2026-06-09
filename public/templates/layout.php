@@ -28,6 +28,7 @@ $nurSchueler = !array_intersect($rollen, ['admin', 'stufenleitung', 'lehrkraft']
     </main>
     <script>
         window.KLAUSURPLAN_ROLLEN = <?= json_encode($rollen, JSON_UNESCAPED_UNICODE) ?>;
+        window.KLAUSURPLAN_ME_ID  = <?= (int) ($benutzer['id'] ?? 0) ?>;
     </script>
     <script src="/assets/app.js"></script>
 </body>

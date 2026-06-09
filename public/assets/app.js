@@ -2666,17 +2666,30 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
                 slStufen = await apiFetch(`/admin/benutzer/${bid}/stufenleitungen`).catch(() => []);
             }
 
+            const ichSelbst = bid === window.KLAUSURPLAN_ME_ID;
+
+            const rollenZeilen = ['admin', 'stufenleitung', 'lehrkraft'].map(r => {
+                const checked  = rArr.includes(r) ? 'checked' : '';
+                // lehrkraft ist immer aktiv (Nutzer sind Lehrkräfte)
+                // admin kann sich selbst nicht entziehen
+                const disabled = (r === 'lehrkraft' || (r === 'admin' && ichSelbst)) ? 'disabled' : '';
+                const hinweis  = r === 'lehrkraft'             ? ' <span style="color:#888;font-size:.8em">(immer)</span>'
+                               : r === 'admin' && ichSelbst    ? ' <span style="color:#888;font-size:.8em">(eigene Rolle)</span>'
+                               : '';
+                return `
+                <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+                    <input type="checkbox" class="cb-rolle" value="${r}" ${checked} ${disabled}>
+                    ${r}${hinweis}
+                </label>`;
+            }).join('');
+
             const overlay = document.createElement('div');
             overlay.className = 'dialog-overlay';
             overlay.innerHTML = `
                 <div class="dialog">
                     <h3>Rollen: ${escHtml(b.vorname)} ${escHtml(b.nachname)}</h3>
                     <div class="formular-gruppe">
-                        ${['admin','stufenleitung','lehrkraft','schueler'].map(r => `
-                        <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
-                            <input type="checkbox" class="cb-rolle" value="${r}" ${rArr.includes(r) ? 'checked' : ''}>
-                            ${r}
-                        </label>`).join('')}
+                        ${rollenZeilen}
                     </div>
                     <div id="sl-stufen-abschnitt" style="${rArr.includes('stufenleitung') ? '' : 'display:none'}">
                         <label style="font-size:.875rem;font-weight:600">Stufen (Stufenleitung):</label>
@@ -2712,7 +2725,10 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
                 saveBtn.disabled = true;
                 fehlerEl.style.display = 'none';
 
-                const neueRollen = [...overlay.querySelectorAll('.cb-rolle:checked')].map(cb => cb.value);
+                // Disabled checkboxes liefert der Browser nicht als :checked → Wert aus dem HTML-Attribut lesen
+                const neueRollen = [...overlay.querySelectorAll('.cb-rolle')].filter(cb =>
+                    cb.disabled ? cb.hasAttribute('checked') : cb.checked
+                ).map(cb => cb.value);
                 const neueStufen = neueRollen.includes('stufenleitung')
                     ? [...slSelect.selectedOptions].map(o => parseInt(o.value))
                     : [];
