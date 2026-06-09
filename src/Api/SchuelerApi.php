@@ -59,16 +59,20 @@ class SchuelerApi
         $benutzer = Session::getBenutzer();
 
         $stmt = $db->prepare(
-            "SELECT nt.id,
+            "SELECT DISTINCT nt.id,
                     nt.termin_datum,
                     nt.termin_uhrzeit,
                     nt.bemerkung,
                     k.anzeigename AS kurs_anzeigename
-             FROM nachschreib_anwesenheiten na
-             JOIN nachschreibtermine nt ON nt.id = na.nachschreibtermin_id
-             JOIN kurs_schueler ks      ON ks.id = na.kurs_schueler_id
-             JOIN kurse k               ON k.id  = ks.kurs_id
+             FROM anwesenheiten a
+             JOIN kurs_schueler ks           ON ks.id = a.kurs_schueler_id
+             JOIN nachschreib_zuordnungen nz ON nz.klausur_id = a.klausur_id
+             JOIN nachschreibtermine nt      ON nt.id = nz.nachschreibtermin_id
+             JOIN klausuren kl               ON kl.id = a.klausur_id
+             JOIN kurse k                    ON k.id  = kl.kurs_id
              WHERE ks.schueler_id = ?
+               AND a.status = 'fehlend'
+               AND (a.entschuldigt IS NULL OR a.entschuldigt = 1)
              ORDER BY
                  CASE WHEN nt.termin_datum IS NULL THEN 1 ELSE 0 END,
                  nt.termin_datum,

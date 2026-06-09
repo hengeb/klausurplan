@@ -495,70 +495,85 @@ async function viewHalbjahre(el) {
     el.innerHTML = '<p class="lade-text">Halbjahre werden geladen…</p>';
     const halbjahre = await apiFetch('/stufenleitung/halbjahre');
 
+    const anlegenBtn = hatRolle('admin', 'stufenleitung')
+        ? `<button class="btn" id="btn-hj-anlegen">+ Stufen und Halbjahr anlegen</button>`
+        : '';
+
     if (halbjahre.length === 0) {
         el.innerHTML = `
             <h2>Halbjahre & Kurse</h2>
+            ${anlegenBtn ? `<div style="margin-bottom:1rem">${anlegenBtn}</div>` : ''}
             <div class="karte">
                 <p>Noch keine Daten importiert. <a href="#import">GoMST-Datei importieren →</a></p>
             </div>`;
+        el.querySelector('#btn-hj-anlegen')?.addEventListener('click', () => zeigeHalbjahrAnlegenDialog(el));
         return;
     }
 
-    // Nach Schuljahr gruppieren
-    const nachSchuljahr = {};
+    // Nach Schuljahr + Abschnitt gruppieren (jedes Halbjahr ist eine Sektion)
+    const nachHalbjahr = {};
     for (const hj of halbjahre) {
-        (nachSchuljahr[hj.schuljahr] ??= []).push(hj);
+        const key = `${hj.schuljahr}|${hj.abschnitt}`;
+        if (!nachHalbjahr[key]) {
+            nachHalbjahr[key] = { schuljahr: hj.schuljahr, abschnitt: hj.abschnitt, stufen: [] };
+        }
+        nachHalbjahr[key].stufen.push(hj);
     }
 
-    const accordion = Object.entries(nachSchuljahr)
-        .sort(([a], [b]) => b.localeCompare(a))
-        .map(([schuljahr, hjs]) => `
-            <div class="accordion-item">
-                <button class="accordion-kopf" type="button">
-                    Schuljahr ${escHtml(schuljahr)}
-                    <span class="accordion-anzahl">${hjs.length} Halbjahr(e)</span>
-                </button>
-                <div class="accordion-body">
-                    ${hjs.map(hj => `
-                        <div class="hj-block" data-hj-id="${hj.id}">
-                            <div class="hj-kopf">
-                                <h4 style="margin:0">${escHtml(hj.stufe)} – ${hj.abschnitt}. Halbjahr
-                                    <span class="hj-meta">${hj.kurs_anzahl} Kurs(e)</span>
-                                </h4>
-                                <div style="display:flex;gap:.5rem;align-items:center">
-                                    <button class="btn btn-klein btn-kurs-laden" data-hj-id="${hj.id}">
-                                        Kurse anzeigen
-                                    </button>
-                                    <button class="btn-icon btn-icon-gefahr btn-hj-loeschen"
-                                            data-hj-id="${hj.id}"
-                                            data-hj-label="${escHtml(hj.stufe + ' – ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}"
-                                            title="Löschen">🗑️</button>
-                                </div>
+    const sortiert = Object.values(nachHalbjahr).sort((a, b) =>
+        b.schuljahr.localeCompare(a.schuljahr) || b.abschnitt - a.abschnitt
+    );
+
+    const accordion = sortiert.map((gruppe, idx) => `
+        <div class="accordion-item">
+            <button class="accordion-kopf" type="button">
+                ${escHtml(gruppe.schuljahr)}, ${gruppe.abschnitt}. Halbjahr
+                <span class="accordion-anzahl">${gruppe.stufen.length} Stufe${gruppe.stufen.length !== 1 ? 'n' : ''}</span>
+            </button>
+            <div class="accordion-body${idx === 0 ? '' : ' versteckt'}">
+                ${gruppe.stufen.map(hj => `
+                    <div class="hj-block" data-hj-id="${hj.id}">
+                        <div class="hj-kopf">
+                            <h4 style="margin:0">${escHtml(hj.stufe)}
+                                <span class="hj-meta">${hj.kurs_anzahl} Kurs(e)</span>
+                            </h4>
+                            <div style="display:flex;gap:.5rem;align-items:center">
+                                <button class="btn btn-klein btn-kurs-laden" data-hj-id="${hj.id}">
+                                    Kurse anzeigen
+                                </button>
+                                ${hatRolle('admin', 'stufenleitung') ? `
+                                <button class="btn btn-klein btn-kurs-hinzufuegen"
+                                        data-hj-id="${hj.id}"
+                                        data-hj-label="${escHtml(hj.stufe + ', ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}">
+                                    + Kurs
+                                </button>` : ''}
+                                <button class="btn-icon btn-icon-gefahr btn-hj-loeschen"
+                                        data-hj-id="${hj.id}"
+                                        data-hj-label="${escHtml(hj.stufe + ', ' + hj.abschnitt + '. HJ ' + hj.schuljahr)}"
+                                        title="Löschen">🗑️</button>
                             </div>
-                            <div id="kurse-${hj.id}" class="kurs-liste versteckt"></div>
                         </div>
-                    `).join('')}
-                </div>
+                        <div id="kurse-${hj.id}" class="kurs-liste versteckt"></div>
+                    </div>
+                `).join('')}
             </div>
-        `).join('');
+        </div>
+    `).join('');
 
-    const aktionenLeiste = hatRolle('admin', 'stufenleitung') ? `
-        <div style="margin-top:1.5rem;display:flex;gap:.5rem;flex-wrap:wrap">
-            <button class="btn btn-sekundaer" id="btn-hj-anlegen">+ Halbjahr anlegen</button>
-            <button class="btn btn-sekundaer" id="btn-kurs-global-hinzufuegen">+ Kurs hinzufügen</button>
-        </div>` : '';
-    el.innerHTML = `<h2>Halbjahre & Kurse</h2><div class="accordion">${accordion}</div>${aktionenLeiste}`;
+    el.innerHTML = `
+        <h2>Halbjahre & Kurse</h2>
+        ${anlegenBtn ? `<div style="margin-bottom:1rem">${anlegenBtn}</div>` : ''}
+        <div class="accordion">${accordion}</div>`;
 
-    // Accordion
+    // Accordion (erstes ist bereits aufgeklappt per Klasse)
     el.querySelectorAll('.accordion-kopf').forEach(btn => {
         btn.addEventListener('click', () => {
             const body = btn.nextElementSibling;
-            body.classList.toggle('versteckt');
-            btn.classList.toggle('offen');
+            const offen = !body.classList.contains('versteckt');
+            body.classList.toggle('versteckt', offen);
+            btn.classList.toggle('offen', !offen);
         });
-        // Erstes Schuljahr aufklappen
-        if (btn === el.querySelector('.accordion-kopf')) {
-            btn.nextElementSibling.classList.remove('versteckt');
+        if (!btn.nextElementSibling.classList.contains('versteckt')) {
             btn.classList.add('offen');
         }
     });
@@ -613,27 +628,35 @@ async function viewHalbjahre(el) {
         });
     });
 
-    // Halbjahr anlegen
+    // Stufen und Halbjahr anlegen
     el.querySelector('#btn-hj-anlegen')?.addEventListener('click', () => {
         zeigeHalbjahrAnlegenDialog(el);
     });
 
-    // Kurs global hinzufügen (lädt halbjahre frisch beim Öffnen)
-    el.querySelector('#btn-kurs-global-hinzufuegen')?.addEventListener('click', () => {
-        zeigeKursHinzufuegenDialog(el);
+    // Kurs hinzufügen (pro Stufe/Halbjahr-Block)
+    el.querySelectorAll('.btn-kurs-hinzufuegen').forEach(btn => {
+        btn.addEventListener('click', () => {
+            zeigeKursHinzufuegenDialog(el, parseInt(btn.dataset.hjId), btn.dataset.hjLabel);
+        });
     });
 
     // Halbjahr löschen
     el.querySelectorAll('.btn-hj-loeschen').forEach(btn => {
         btn.addEventListener('click', async () => {
-            const hjId    = btn.dataset.hjId;
-            const label   = btn.dataset.hjLabel;
-            if (!confirm(`Halbjahr „${label}" wirklich löschen?\n\nDabei werden alle Kurse, Klausuren und Anwesenheitsdaten dieses Halbjahrs unwiderruflich gelöscht.`)) return;
+            const hjId  = btn.dataset.hjId;
+            const label = btn.dataset.hjLabel;
+            if (!confirm(`Stufe „${label}" wirklich löschen?\n\nDabei werden alle Kurse, Klausuren und Anwesenheitsdaten unwiderruflich gelöscht.`)) return;
 
             btn.disabled = true;
             try {
                 await apiFetch(`/stufenleitung/daten/${hjId}`, { method: 'DELETE' });
-                btn.closest('.hj-block').remove();
+                const block = btn.closest('.hj-block');
+                const accordionBody = block.closest('.accordion-body');
+                block.remove();
+                // Wenn Sektion leer → Accordion-Item entfernen
+                if (!accordionBody.querySelector('.hj-block')) {
+                    accordionBody.closest('.accordion-item').remove();
+                }
             } catch (err) {
                 alert(`Fehler: ${err.message}`);
                 btn.disabled = false;
@@ -738,18 +761,12 @@ async function zeigeHalbjahrAnlegenDialog(el) {
     });
 }
 
-async function zeigeKursHinzufuegenDialog(viewEl) {
-    let halbjahre = [], lehrkraefte = [];
+async function zeigeKursHinzufuegenDialog(viewEl, hjId, hjLabel) {
+    let lehrkraefte = [];
     try {
-        [halbjahre, lehrkraefte] = await Promise.all([
-            apiFetch('/stufenleitung/halbjahre'),
-            apiFetch('/stufenleitung/lehrkraefte'),
-        ]);
+        lehrkraefte = await apiFetch('/stufenleitung/lehrkraefte');
     } catch {}
 
-    const hjOptionen = halbjahre.map(hj =>
-        `<option value="${hj.id}">${escHtml(hj.stufe)} – ${hj.abschnitt}. HJ ${escHtml(hj.schuljahr)}</option>`
-    ).join('');
     const lkOptionen = `<option value="">– keine –</option>` + lehrkraefte.map(lk => {
         const nachname = lk.nachname.replace(/\s*\([^)]+\)$/, '');
         const kuerzel  = lk.kuerzel ? ` (${escHtml(lk.kuerzel)})` : '';
@@ -761,10 +778,7 @@ async function zeigeKursHinzufuegenDialog(viewEl) {
     overlay.innerHTML = `
         <div class="dialog">
             <h3>Kurs hinzufügen</h3>
-            <div class="formular-gruppe">
-                <label>Stufe</label>
-                <select id="dlg-hj-id">${hjOptionen}</select>
-            </div>
+            ${hjLabel ? `<p class="dialog-kursname">${escHtml(hjLabel)}</p>` : ''}
             <div class="formular-gruppe">
                 <label>Kursbezeichnung</label>
                 <input type="text" id="dlg-kurs-bezeichnung" placeholder="z.B. SP_Q2_GK1_SZ" maxlength="50">
@@ -787,17 +801,17 @@ async function zeigeKursHinzufuegenDialog(viewEl) {
             <p id="dlg-kurs-fehler" class="fehler" style="display:none"></p>
         </div>`;
     document.body.appendChild(overlay);
+    overlay.querySelector('#dlg-kurs-bezeichnung').focus();
 
     overlay.querySelector('#dlg-kurs-abbrechen').addEventListener('click', () => overlay.remove());
     schliessbar(overlay);
 
     overlay.querySelector('#dlg-kurs-speichern').addEventListener('click', async () => {
-        const btn       = overlay.querySelector('#dlg-kurs-speichern');
-        const fehlerEl  = overlay.querySelector('#dlg-kurs-fehler');
-        const hjId      = parseInt(overlay.querySelector('#dlg-hj-id').value);
+        const btn         = overlay.querySelector('#dlg-kurs-speichern');
+        const fehlerEl    = overlay.querySelector('#dlg-kurs-fehler');
         const bezeichnung = overlay.querySelector('#dlg-kurs-bezeichnung').value.trim();
-        const kursart   = overlay.querySelector('#dlg-kursart').value;
-        const lehrerId  = parseInt(overlay.querySelector('#dlg-lk-id').value) || null;
+        const kursart     = overlay.querySelector('#dlg-kursart').value;
+        const lehrerId    = parseInt(overlay.querySelector('#dlg-lk-id').value) || null;
 
         if (!bezeichnung) {
             fehlerEl.textContent = 'Bitte eine Kursbezeichnung eingeben.';
@@ -823,7 +837,7 @@ async function zeigeKursHinzufuegenDialog(viewEl) {
                 }
             }
 
-            // Kurs-Anzahl im Halbjahr-Kopf aktualisieren
+            // Kurs-Anzahl im Stufen-Kopf aktualisieren
             const hjBlock = viewEl.querySelector(`.hj-block[data-hj-id="${hjId}"]`);
             const meta = hjBlock?.querySelector('.hj-meta');
             if (meta) {

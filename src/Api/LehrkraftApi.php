@@ -540,9 +540,11 @@ class LehrkraftApi
                     k.anzeigename AS kurs_anzeigename,
                     kl.klausur_nr,
                     (SELECT COUNT(*)
-                     FROM nachschreib_anwesenheiten na
-                     JOIN kurs_schueler ks ON ks.id = na.kurs_schueler_id AND ks.kurs_id = k.id
-                     WHERE na.nachschreibtermin_id = nt.id) AS nachschreiber_anzahl
+                     FROM anwesenheiten a2
+                     JOIN kurs_schueler ks2 ON ks2.id = a2.kurs_schueler_id AND ks2.kurs_id = k.id
+                     WHERE a2.klausur_id = kl.id
+                       AND a2.status = 'fehlend'
+                       AND (a2.entschuldigt IS NULL OR a2.entschuldigt = 1)) AS nachschreiber_anzahl
              FROM nachschreib_zuordnungen nz
              JOIN nachschreibtermine nt ON nt.id = nz.nachschreibtermin_id
              JOIN klausuren kl          ON kl.id = nz.klausur_id
