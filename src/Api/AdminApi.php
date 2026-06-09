@@ -67,6 +67,11 @@ class AdminApi
             $db->prepare("INSERT INTO rollen (benutzer_id, rolle) VALUES $platzhalter")->execute($params);
         }
 
+        // Stufenleitungs-Zuordnungen entfernen wenn Rolle entzogen
+        if (!in_array('stufenleitung', $rollen, true)) {
+            $db->prepare('DELETE FROM stufenleitungen WHERE benutzer_id = ?')->execute([$benutzerId]);
+        }
+
         return ['id' => $benutzerId, 'rollen' => $rollen];
     }
 
