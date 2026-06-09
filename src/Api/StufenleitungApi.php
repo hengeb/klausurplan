@@ -181,20 +181,93 @@ class StufenleitungApi
     // ------------------------------------------------------------------
 
     /**
-     * Legt ein neues Halbjahr (und bei Bedarf die Stufe) manuell an.
+     * Berechnet den Vorschlag für das nächste anzulegende Halbjahr.
+     *
+     * Logik:
+     * – Wenn das neueste Halbjahr noch nicht alle bekannten Stufen enthält:
+     *   → gleiches Schuljahr/Abschnitt, fehlende_stufen gefüllt
+     * – Sonst: Abschnitt 1 → Abschnitt 2 (gleiches Schuljahr)
+     *          Abschnitt 2 → Abschnitt 1 (nächstes Schuljahr)
+     *
+     * @return array{schuljahr: string, abschnitt: int, fehlende_stufen: list<string>}
+     */
+    public static function getHalbjahrVorschlag(): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        // Alle bekannten Stufennamen (Referenzmenge)
+        $alleStufenNamen = $db->query(
+            "SELECT DISTINCT name FROM stufen ORDER BY name"
+        )->fetchAll(\PDO::FETCH_COLUMN);
+
+        // Neuestes Halbjahr bestimmen
+        $neuestes = $db->query(
+            "SELECT s.schuljahr, h.abschnitt
+             FROM halbjahre h
+             JOIN stufen s ON s.id = h.stufe_id
+             ORDER BY s.schuljahr DESC, h.abschnitt DESC
+             LIMIT 1"
+        )->fetch();
+
+        if ($neuestes === false) {
+            $year = (int) date('Y');
+            $month = (int) date('n');
+            $schuljahr = $month >= 8 ? "{$year}/" . ($year + 1) : ($year - 1) . "/{$year}";
+            return ['schuljahr' => $schuljahr, 'abschnitt' => 1, 'fehlende_stufen' => []];
+        }
+
+        $schuljahr = $neuestes['schuljahr'];
+        $abschnitt = (int) $neuestes['abschnitt'];
+
+        // Welche Stufen sind für dieses Schuljahr+Abschnitt bereits vorhanden?
+        $stmt = $db->prepare(
+            "SELECT s.name FROM halbjahre h
+             JOIN stufen s ON s.id = h.stufe_id
+             WHERE s.schuljahr = ? AND h.abschnitt = ?"
+        );
+        $stmt->execute([$schuljahr, $abschnitt]);
+        $vorhandene = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+
+        $fehlende = array_values(array_diff($alleStufenNamen, $vorhandene));
+        sort($fehlende);
+
+        if (!empty($fehlende)) {
+            return ['schuljahr' => $schuljahr, 'abschnitt' => $abschnitt, 'fehlende_stufen' => $fehlende];
+        }
+
+        // Alle vollständig → nächstes Halbjahr vorschlagen, alle bekannten Stufen voranstellen
+        $alleStufen = array_values($alleStufenNamen);
+        sort($alleStufen);
+        if ($abschnitt === 1) {
+            return ['schuljahr' => $schuljahr, 'abschnitt' => 2, 'fehlende_stufen' => $alleStufen];
+        }
+        [$start, $end] = explode('/', $schuljahr, 2);
+        $naechstesSchuljahr = ((int) $start + 1) . '/' . ((int) $end + 1);
+        return ['schuljahr' => $naechstesSchuljahr, 'abschnitt' => 1, 'fehlende_stufen' => $alleStufen];
+    }
+
+    /**
+     * Legt ein neues Halbjahr an. stufe_name darf eine kommagetrennte Liste sein,
+     * dann werden mehrere Halbjahre auf einmal angelegt.
      *
      * Body: { stufe_name: string, schuljahr: string, abschnitt: 1|2 }
+     * Rückgabe (Einzel): { id, stufe, schuljahr, abschnitt, kurs_anzahl }
+     * Rückgabe (Mehrfach): { erstellt: [...], fehler: [...] }
      */
     public static function addHalbjahr(array $body): array
     {
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
-        $stufeName = strtoupper(trim($body['stufe_name'] ?? ''));
+        $stufeNamen = array_values(array_unique(array_filter(
+            array_map(fn(string $s) => strtoupper(trim($s)), explode(',', trim($body['stufe_name'] ?? ''))),
+            fn(string $s) => $s !== ''
+        )));
         $schuljahr = trim($body['schuljahr'] ?? '');
         $abschnitt = (int) ($body['abschnitt'] ?? 0);
 
-        if ($stufeName === '') {
+        if (empty($stufeNamen)) {
             http_response_code(400);
             throw new RuntimeException('Stufe darf nicht leer sein.');
         }
@@ -207,30 +280,61 @@ class StufenleitungApi
             throw new RuntimeException('Abschnitt muss 1 oder 2 sein.');
         }
 
-        // Stufe anlegen oder finden
+        $benutzerId = Session::getBenutzer()['id'];
+
+        if (count($stufeNamen) === 1) {
+            try {
+                return self::erstelleHalbjahr($stufeNamen[0], $schuljahr, $abschnitt, $db, $benutzerId);
+            } catch (\DomainException $e) {
+                http_response_code(409);
+                throw new RuntimeException($e->getMessage());
+            }
+        }
+
+        // Mehrere Stufen: alle verarbeiten, Teilerfolge erlaubt
+        $erstellt = [];
+        $fehler   = [];
+        foreach ($stufeNamen as $stufeName) {
+            try {
+                $erstellt[] = self::erstelleHalbjahr($stufeName, $schuljahr, $abschnitt, $db, $benutzerId);
+            } catch (\DomainException $e) {
+                $fehler[] = ['stufe' => $stufeName, 'meldung' => $e->getMessage()];
+            }
+        }
+        http_response_code(200);
+        return ['erstellt' => $erstellt, 'fehler' => $fehler];
+    }
+
+    /** Legt genau eine Stufe+Halbjahr-Kombination an. Wirft \DomainException bei Duplikat. */
+    private static function erstelleHalbjahr(
+        string $stufeName,
+        string $schuljahr,
+        int    $abschnitt,
+        \PDO   $db,
+        int    $benutzerId
+    ): array {
         $stmt = $db->prepare('SELECT id FROM stufen WHERE name = ? AND schuljahr = ?');
         $stmt->execute([$stufeName, $schuljahr]);
-        $stufeId  = $stmt->fetchColumn();
+        $stufeId   = $stmt->fetchColumn();
         $neueStufe = $stufeId === false;
+
+        if (!$neueStufe) {
+            // Prüfe Duplikat bevor wir irgendetwas schreiben
+            $stmt = $db->prepare('SELECT id FROM halbjahre WHERE stufe_id = ? AND abschnitt = ?');
+            $stmt->execute([$stufeId, $abschnitt]);
+            if ($stmt->fetchColumn() !== false) {
+                throw new \DomainException("{$stufeName} – {$abschnitt}. Halbjahr {$schuljahr} existiert bereits.");
+            }
+        }
+
         if ($neueStufe) {
             $db->prepare('INSERT INTO stufen (name, schuljahr) VALUES (?, ?)')->execute([$stufeName, $schuljahr]);
             $stufeId = (int) $db->lastInsertId();
         }
 
-        // Halbjahr darf nicht bereits existieren
-        $stmt = $db->prepare('SELECT id FROM halbjahre WHERE stufe_id = ? AND abschnitt = ?');
-        $stmt->execute([$stufeId, $abschnitt]);
-        if ($stmt->fetchColumn() !== false) {
-            http_response_code(409);
-            throw new RuntimeException(
-                "{$stufeName} – {$abschnitt}. Halbjahr {$schuljahr} existiert bereits."
-            );
-        }
-
-        $benutzer = Session::getBenutzer();
         $db->prepare(
             'INSERT INTO halbjahre (stufe_id, abschnitt, importiert_von) VALUES (?, ?, ?)'
-        )->execute([$stufeId, $abschnitt, $benutzer['id']]);
+        )->execute([$stufeId, $abschnitt, $benutzerId]);
         $halbjahrId = (int) $db->lastInsertId();
 
         if ($neueStufe) {

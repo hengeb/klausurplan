@@ -515,6 +515,52 @@ class LehrkraftApi
     }
 
     // ------------------------------------------------------------------
+    // Nachschreibtermine für Lehrkraft (eigene Kurse)
+    // ------------------------------------------------------------------
+
+    /**
+     * Gibt alle Nachschreibtermine zurück, bei denen mindestens ein Schüler
+     * aus einer der eigenen Klausuren zugeordnet ist.
+     *
+     * @return list<array{id: int, termin_datum: ?string, termin_uhrzeit: ?string,
+     *                     bemerkung: ?string, kurs_anzeigename: string,
+     *                     klausur_nr: int, nachschreiber_anzahl: int}>
+     */
+    public static function meineNachschreibtermine(): array
+    {
+        Session::requireRolle('admin', 'stufenleitung', 'lehrkraft');
+        $db       = Database::getInstance();
+        $benutzer = Session::getBenutzer();
+
+        $stmt = $db->prepare(
+            "SELECT nt.id,
+                    nt.termin_datum,
+                    nt.termin_uhrzeit,
+                    nt.bemerkung,
+                    k.anzeigename AS kurs_anzeigename,
+                    kl.klausur_nr,
+                    (SELECT COUNT(*)
+                     FROM nachschreib_anwesenheiten na
+                     JOIN kurs_schueler ks ON ks.id = na.kurs_schueler_id AND ks.kurs_id = k.id
+                     WHERE na.nachschreibtermin_id = nt.id) AS nachschreiber_anzahl
+             FROM nachschreib_zuordnungen nz
+             JOIN nachschreibtermine nt ON nt.id = nz.nachschreibtermin_id
+             JOIN klausuren kl          ON kl.id = nz.klausur_id
+             JOIN kurse k               ON k.id  = kl.kurs_id
+             WHERE k.lehrer_id = ?
+             ORDER BY
+                 CASE WHEN nt.termin_datum IS NULL THEN 1 ELSE 0 END,
+                 nt.termin_datum,
+                 nt.termin_uhrzeit,
+                 k.anzeigename,
+                 kl.klausur_nr"
+        );
+        $stmt->execute([$benutzer['id']]);
+
+        return $stmt->fetchAll();
+    }
+
+    // ------------------------------------------------------------------
     // Löschen
     // ------------------------------------------------------------------
 

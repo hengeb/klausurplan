@@ -649,12 +649,9 @@ async function zeigeHalbjahrAnlegenDialog(el) {
         <div class="dialog">
             <h3>Halbjahr anlegen</h3>
             <div class="formular-gruppe">
-                <label>Stufe</label>
+                <label>Stufe <span style="font-weight:normal;font-size:.85em">(kommagetrennt für mehrere)</span></label>
                 <input type="text" id="dlg-hj-stufe" placeholder="z.B. EF, Q1, Q2"
-                       list="dlg-stufen-list" maxlength="20" autocomplete="off">
-                <datalist id="dlg-stufen-list">
-                    <option value="EF"><option value="Q1"><option value="Q2">
-                </datalist>
+                       maxlength="100" autocomplete="off">
             </div>
             <div class="formular-gruppe">
                 <label>Schuljahr</label>
@@ -674,15 +671,27 @@ async function zeigeHalbjahrAnlegenDialog(el) {
             <p id="dlg-hj-fehler" class="fehler" style="display:none"></p>
         </div>`;
     document.body.appendChild(overlay);
-    overlay.querySelector('#dlg-hj-stufe').focus();
 
     overlay.querySelector('#dlg-hj-abbrechen').addEventListener('click', () => overlay.remove());
     schliessbar(overlay);
 
+    // Vorschlag laden und Felder vorausfüllen
+    try {
+        const vorschlag = await apiFetch('/stufenleitung/halbjahr-vorschlag');
+        overlay.querySelector('#dlg-hj-schuljahr').value = vorschlag.schuljahr ?? '';
+        overlay.querySelector('#dlg-hj-abschnitt').value = String(vorschlag.abschnitt ?? 1);
+        if (vorschlag.fehlende_stufen && vorschlag.fehlende_stufen.length > 0) {
+            overlay.querySelector('#dlg-hj-stufe').value = vorschlag.fehlende_stufen.join(', ');
+        }
+    } catch {
+        // Vorschlag optional – kein Fehler anzeigen
+    }
+    overlay.querySelector('#dlg-hj-stufe').focus();
+
     overlay.querySelector('#dlg-hj-speichern').addEventListener('click', async () => {
-        const btn      = overlay.querySelector('#dlg-hj-speichern');
-        const fehlerEl = overlay.querySelector('#dlg-hj-fehler');
-        const stufe    = overlay.querySelector('#dlg-hj-stufe').value.trim().toUpperCase();
+        const btn       = overlay.querySelector('#dlg-hj-speichern');
+        const fehlerEl  = overlay.querySelector('#dlg-hj-fehler');
+        const stufe     = overlay.querySelector('#dlg-hj-stufe').value.trim();
         const schuljahr = overlay.querySelector('#dlg-hj-schuljahr').value.trim();
         const abschnitt = parseInt(overlay.querySelector('#dlg-hj-abschnitt').value);
 
@@ -700,12 +709,27 @@ async function zeigeHalbjahrAnlegenDialog(el) {
         btn.disabled = true;
         fehlerEl.style.display = 'none';
         try {
-            await apiFetch('/stufenleitung/halbjahre', {
+            const res = await apiFetch('/stufenleitung/halbjahre', {
                 method: 'POST',
                 body: JSON.stringify({ stufe_name: stufe, schuljahr, abschnitt }),
             });
-            overlay.remove();
-            viewHalbjahre(el);
+
+            // Bei Mehrfach-Anlage: Fehler anzeigen, aber trotzdem neu laden
+            if (res.fehler && res.fehler.length > 0) {
+                const fehlermeldungen = res.fehler.map(f => `${f.stufe}: ${f.meldung}`).join('\n');
+                const erstelltAnzahl = res.erstellt?.length ?? 0;
+                const meldung = erstelltAnzahl > 0
+                    ? `${erstelltAnzahl} Halbjahr(e) angelegt.\n\nFehler:\n${fehlermeldungen}`
+                    : `Fehler:\n${fehlermeldungen}`;
+                alert(meldung);
+            }
+
+            if (!res.fehler || res.erstellt?.length > 0) {
+                overlay.remove();
+                viewHalbjahre(el);
+            } else {
+                btn.disabled = false;
+            }
         } catch (err) {
             fehlerEl.textContent = err.message;
             fehlerEl.style.display = '';
@@ -1080,17 +1104,21 @@ async function viewKlausuren(el) {
 async function ladeKlausurenUebersicht(el) {
     el.innerHTML = '<p class="lade-text">Wird geladen…</p>';
     try {
-        const klausuren = await apiFetch('/klausuren');
-        renderKlausurenUebersicht(el, klausuren);
+        const nurLehrkraft = hatRolle('lehrkraft') && !hatRolle('admin', 'stufenleitung');
+        const anfragen = [apiFetch('/klausuren')];
+        if (nurLehrkraft) anfragen.push(apiFetch('/klausuren/meine-nachschreibtermine'));
+        const [klausuren, nachschreibtermine] = await Promise.all(anfragen);
+        renderKlausurenUebersicht(el, klausuren, nachschreibtermine ?? []);
     } catch (err) {
         el.innerHTML = `<p class="fehler">${err.message}</p>`;
     }
 }
 
-function renderKlausurenUebersicht(el, klausuren) {
+function renderKlausurenUebersicht(el, klausuren, nachschreibtermine = []) {
     if (klausuren.length === 0) {
         el.innerHTML = `<div class="karte"><p>Noch keine Klausuren angelegt.
             ${hatRolle('admin', 'stufenleitung') ? ' Nutzen Sie "Einzeln anlegen" oder "Excel-Import".' : ''}</p></div>`;
+        renderLehrkraftNachschreibtermine(el, nachschreibtermine);
         return;
     }
 
@@ -1196,6 +1224,48 @@ function renderKlausurenUebersicht(el, klausuren) {
             }
         });
     });
+
+    renderLehrkraftNachschreibtermine(el, nachschreibtermine);
+}
+
+function renderLehrkraftNachschreibtermine(el, nachschreibtermine) {
+    if (!nachschreibtermine || nachschreibtermine.length === 0) return;
+
+    const zeilen = nachschreibtermine.map(nt => {
+        const datum   = nt.termin_datum   ? formatDatum(nt.termin_datum)      : '<span class="fehlend">–</span>';
+        const uhrzeit = nt.termin_uhrzeit ? nt.termin_uhrzeit.substring(0, 5) : '–';
+        const anzahl  = parseInt(nt.nachschreiber_anzahl) || 0;
+        const nr      = nt.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${nt.klausur_nr})</span>` : '';
+        return `
+        <tr${!nt.termin_datum ? ' class="fehlend"' : ''}>
+            <td>${escHtml(nt.kurs_anzeigename)}${nr}</td>
+            <td>${datum}</td>
+            <td>${uhrzeit}</td>
+            <td>${anzahl > 0 ? anzahl : '–'}</td>
+            <td>${nt.bemerkung ? escHtml(nt.bemerkung) : '–'}</td>
+        </tr>`;
+    }).join('');
+
+    const div = document.createElement('div');
+    div.innerHTML = `
+        <h3 style="margin-top:1.5rem">Meine Nachschreibtermine</h3>
+        <div class="karte" style="padding:0;overflow:hidden">
+            <div class="tabelle-wrapper">
+                <table class="data-tabelle">
+                    <thead>
+                        <tr>
+                            <th>Kurs</th>
+                            <th>Datum</th>
+                            <th>Uhrzeit</th>
+                            <th>Nachschreiber*innen</th>
+                            <th>Bemerkung</th>
+                        </tr>
+                    </thead>
+                    <tbody>${zeilen}</tbody>
+                </table>
+            </div>
+        </div>`;
+    el.appendChild(div);
 }
 
 function renderKlausurZeile(k) {
@@ -2326,43 +2396,20 @@ async function viewSchueler(el) {
 
     el.innerHTML = '<p class="lade-text">Klausurtermine werden geladen…</p>';
 
-    let klausuren;
+    let klausuren, nachschreibtermine;
     try {
-        klausuren = await apiFetch('/schueler/meine-klausuren');
+        [klausuren, nachschreibtermine] = await Promise.all([
+            apiFetch('/schueler/meine-klausuren'),
+            apiFetch('/schueler/meine-nachschreibtermine'),
+        ]);
     } catch (err) {
         el.innerHTML = `<p class="fehler">Fehler: ${escHtml(err.message)}</p>`;
         return;
     }
 
-    if (klausuren.length === 0) {
-        el.innerHTML = `
-            <h2>Meine Klausuren</h2>
-            <div class="karte">
-                <p>Es wurden noch keine Klausurtermine für dich eingetragen.</p>
-            </div>`;
-        return;
-    }
-
-    const zeilen = klausuren.map(k => {
-        const datum   = k.termin_datum   ? formatDatum(k.termin_datum)      : '<span class="fehlend">–</span>';
-        const uhrzeit = k.termin_uhrzeit ? k.termin_uhrzeit.substring(0, 5) : '–';
-        const dauer   = k.dauer_minuten  ? `${k.dauer_minuten} min`         : '–';
-        const nr      = k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : '';
-
-        const datumKlasse = !k.termin_datum ? ' class="fehlend"' : '';
-
-        return `
-        <tr${datumKlasse}>
-            <td>${escHtml(k.kurs_anzeigename)}${nr}</td>
-            <td>${datum}</td>
-            <td>${uhrzeit}</td>
-            <td>${dauer}</td>
-        </tr>`;
-    }).join('');
-
-    el.innerHTML = `
-        <h2>Meine Klausuren</h2>
-        <div class="karte" style="padding:0;overflow:hidden">
+    const klausurenHtml = klausuren.length === 0
+        ? '<div class="karte"><p>Es wurden noch keine Klausurtermine für dich eingetragen.</p></div>'
+        : `<div class="karte" style="padding:0;overflow:hidden">
             <div class="tabelle-wrapper">
                 <table class="data-tabelle">
                     <thead>
@@ -2373,10 +2420,52 @@ async function viewSchueler(el) {
                             <th>Dauer</th>
                         </tr>
                     </thead>
-                    <tbody>${zeilen}</tbody>
+                    <tbody>${klausuren.map(k => {
+                        const datum   = k.termin_datum   ? formatDatum(k.termin_datum)      : '<span class="fehlend">–</span>';
+                        const uhrzeit = k.termin_uhrzeit ? k.termin_uhrzeit.substring(0, 5) : '–';
+                        const dauer   = k.dauer_minuten  ? `${k.dauer_minuten} min`         : '–';
+                        const nr      = k.klausur_nr > 1 ? ` <span class="klausur-nr">(Nr. ${k.klausur_nr})</span>` : '';
+                        return `
+                        <tr${!k.termin_datum ? ' class="fehlend"' : ''}>
+                            <td>${escHtml(k.kurs_anzeigename)}${nr}</td>
+                            <td>${datum}</td>
+                            <td>${uhrzeit}</td>
+                            <td>${dauer}</td>
+                        </tr>`;
+                    }).join('')}</tbody>
                 </table>
             </div>
         </div>`;
+
+    const ntHtml = nachschreibtermine.length === 0 ? '' : `
+        <h2>Meine Nachschreibtermine</h2>
+        <div class="karte" style="padding:0;overflow:hidden">
+            <div class="tabelle-wrapper">
+                <table class="data-tabelle">
+                    <thead>
+                        <tr>
+                            <th>Kurs</th>
+                            <th>Datum</th>
+                            <th>Uhrzeit</th>
+                            <th>Bemerkung</th>
+                        </tr>
+                    </thead>
+                    <tbody>${nachschreibtermine.map(nt => {
+                        const datum   = nt.termin_datum   ? formatDatum(nt.termin_datum)      : '<span class="fehlend">–</span>';
+                        const uhrzeit = nt.termin_uhrzeit ? nt.termin_uhrzeit.substring(0, 5) : '–';
+                        return `
+                        <tr${!nt.termin_datum ? ' class="fehlend"' : ''}>
+                            <td>${escHtml(nt.kurs_anzeigename)}</td>
+                            <td>${datum}</td>
+                            <td>${uhrzeit}</td>
+                            <td>${nt.bemerkung ? escHtml(nt.bemerkung) : '–'}</td>
+                        </tr>`;
+                    }).join('')}</tbody>
+                </table>
+            </div>
+        </div>`;
+
+    el.innerHTML = `<h2>Meine Klausuren</h2>${klausurenHtml}${ntHtml}`;
 }
 
 // ---------------------------------------------------------------------------

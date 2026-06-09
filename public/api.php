@@ -135,6 +135,10 @@ $router->get('/stufenleitung/halbjahre', function (): array {
     return StufenleitungApi::getHalbjahre();
 }, 'admin', 'stufenleitung');
 
+$router->get('/stufenleitung/halbjahr-vorschlag', function (): array {
+    return StufenleitungApi::getHalbjahrVorschlag();
+}, 'admin', 'stufenleitung');
+
 $router->post('/stufenleitung/halbjahre', function (): array {
     return StufenleitungApi::addHalbjahr(Router::jsonBody());
 }, 'admin', 'stufenleitung');
@@ -158,10 +162,14 @@ $router->get('/klausuren', function (): array {
     return LehrkraftApi::getKlausuren();
 }, 'admin', 'stufenleitung', 'lehrkraft');
 
-// Vorlage-Download und paste-import VOR {id}, sonst werden sie als ID interpretiert
+// Vorlage-Download, paste-import und meine-nachschreibtermine VOR {id}, sonst werden sie als ID interpretiert
 $router->get('/klausuren/vorlage', function (): never {
     LehrkraftApi::downloadVorlage();
 }, 'admin', 'stufenleitung');
+
+$router->get('/klausuren/meine-nachschreibtermine', function (): array {
+    return LehrkraftApi::meineNachschreibtermine();
+}, 'admin', 'stufenleitung', 'lehrkraft');
 
 $router->post('/klausuren/paste-import', function (): array {
     $zeilen = Router::jsonBody();
@@ -287,6 +295,10 @@ $router->post('/nachschreib-anwesenheit/{id}', function (array $p): array {
 // ------------------------------------------------------------------
 $router->get('/schueler/meine-klausuren', function (): array {
     return SchuelerApi::meineKlausuren();
+}, 'schueler');
+
+$router->get('/schueler/meine-nachschreibtermine', function (): array {
+    return SchuelerApi::meineNachschreibtermine();
 }, 'schueler');
 
 // ------------------------------------------------------------------
