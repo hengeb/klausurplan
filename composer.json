@@ -15,5 +15,25 @@
     },
     "config": {
         "optimize-autoloader": true
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Klausurplan\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit --testsuite Unit",
+        "test:unit": "phpunit --testsuite Unit",
+        "test:integration": "bin/test-integration.sh",
+        "test:js": "npm test"
+    },
+    "scripts-descriptions": {
+        "test": "Unit-Tests (schnell, ohne Datenbank)",
+        "test:unit": "Unit-Tests (schnell, ohne Datenbank)",
+        "test:integration": "Integrationstests gegen eine Wegwerf-Datenbank in Docker",
+        "test:js": "Frontend-Tests (jsdom, benötigt npm install)"
     }
 }

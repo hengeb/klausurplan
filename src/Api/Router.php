@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Klausurplan\Api;
 
 use Klausurplan\Auth\Session;
+use Klausurplan\Support\Prozess;
 
 class Router
 {
@@ -72,7 +73,11 @@ class Router
                 http_response_code(500);
                 echo json_encode(['fehler' => 'JSON-Serialisierungsfehler']);
             } catch (\RuntimeException $e) {
-                http_response_code(400);
+                // Handler setzen bei Bedarf selbst 403/404/409/422 – nur ohne Fehlerstatus gilt 400
+                $status = http_response_code();
+                if (!is_int($status) || $status < 400) {
+                    http_response_code(400);
+                }
                 echo json_encode(['fehler' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
             } catch (\Throwable $e) {
                 http_response_code(500);
@@ -103,20 +108,30 @@ class Router
         return array_filter($treffer, 'is_string', ARRAY_FILTER_USE_KEY);
     }
 
-    public static function jsonBody(): array
+    /**
+     * Liest den JSON-Body der Anfrage. Ungültiges JSON (oder etwas anderes als ein Objekt/Array)
+     * beendet die Anfrage mit HTTP 400. $roh dient nur Tests; sonst wird php://input gelesen.
+     */
+    public static function jsonBody(?string $roh = null): array
     {
-        $raw = file_get_contents('php://input');
+        $raw = $roh ?? file_get_contents('php://input');
         if (empty($raw)) {
             return [];
         }
 
         try {
-            return json_decode($raw, true, 512, JSON_THROW_ON_ERROR) ?? [];
+            $daten = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
+            $daten = false;
+        }
+
+        if ($daten !== null && !is_array($daten)) {
             http_response_code(400);
             header('Content-Type: application/json');
             echo json_encode(['fehler' => 'Ungültiger JSON-Body']);
-            exit;
+            Prozess::beenden();
         }
+
+        return $daten ?? [];
     }
 }

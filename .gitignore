@@ -25,3 +25,9 @@ Thumbs.db
 
 
 SchuelerLeistungsdaten.dat
+# PHPUnit
+/.phpunit.cache/
+/coverage/
+
+# Node (nur Frontend-Tests)
+/node_modules/

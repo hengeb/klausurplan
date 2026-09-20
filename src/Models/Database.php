@@ -24,6 +24,12 @@ class Database
         return self::$instance;
     }
 
+    /** Ersetzt die Instanz (nur für Tests); null setzt zurück, sodass neu verbunden wird. */
+    public static function setInstance(?PDO $pdo): void
+    {
+        self::$instance = $pdo;
+    }
+
     private static function connect(): PDO
     {
         $host = $_ENV['DB_HOST'] ?? 'localhost';

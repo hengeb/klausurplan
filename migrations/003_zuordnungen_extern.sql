@@ -5,7 +5,16 @@
 
 SET NAMES utf8mb4;
 
-ALTER TABLE benutzer ADD COLUMN IF NOT EXISTS extern TINYINT(1) NOT NULL DEFAULT 0 AFTER stufe;
+-- Spalte nur anlegen, wenn sie fehlt (läuft auf MariaDB und MySQL; „ADD COLUMN IF NOT EXISTS“ gibt es nur in MariaDB)
+SET @sql = IF(
+    (SELECT COUNT(*) FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'benutzer' AND COLUMN_NAME = 'extern') = 0,
+    'ALTER TABLE benutzer ADD COLUMN extern TINYINT(1) NOT NULL DEFAULT 0 AFTER stufe',
+    'DO 0'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS schueler_zuordnungen (
     name_roh      VARCHAR(200) NOT NULL PRIMARY KEY,

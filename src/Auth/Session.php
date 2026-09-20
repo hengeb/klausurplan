@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Klausurplan\Auth;
 
 use Klausurplan\Models\Database;
+use Klausurplan\Support\Prozess;
 
 class Session
 {
@@ -79,7 +80,7 @@ class Session
             http_response_code(401);
             header('Content-Type: application/json');
             echo json_encode(['fehler' => 'Nicht authentifiziert']);
-            exit;
+            Prozess::beenden();
         }
     }
 
@@ -96,7 +97,7 @@ class Session
         http_response_code(403);
         header('Content-Type: application/json');
         echo json_encode(['fehler' => 'Keine Berechtigung']);
-        exit;
+        Prozess::beenden();
     }
 
     public static function updateZuletztGesehen(): void

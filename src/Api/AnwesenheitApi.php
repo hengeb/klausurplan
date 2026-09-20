@@ -6,6 +6,7 @@ namespace Klausurplan\Api;
 
 use Klausurplan\Auth\Session;
 use Klausurplan\Models\Database;
+use Klausurplan\Support\Prozess;
 use RuntimeException;
 
 class AnwesenheitApi
@@ -555,6 +556,6 @@ class AnwesenheitApi
         </body>
         </html>
         HTML;
-        exit();
+        Prozess::beenden();
     }
 }

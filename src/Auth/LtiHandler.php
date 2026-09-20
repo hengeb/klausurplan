@@ -7,6 +7,7 @@ namespace Klausurplan\Auth;
 use ceLTIc\LTI\Tool;
 use ceLTIc\LTI\DataConnector\DataConnector;
 use Klausurplan\Models\Database;
+use Klausurplan\Support\Prozess;
 use PDO;
 
 class LtiHandler extends Tool
@@ -76,7 +77,7 @@ class LtiHandler extends Tool
 
         $appUrl = rtrim($_ENV['APP_URL'] ?? '', '/');
         header('Location: ' . $appUrl . '/');
-        exit;
+        Prozess::beenden();
     }
 
     /**

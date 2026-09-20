@@ -180,7 +180,7 @@ class MoodleApi
      * E-Mails, die Nutzer*innen in Moodle als privat markiert haben, werden nicht
      * zurückgegeben – sie werden stattdessen beim LTI-Login aus dem JWT-Claim befüllt.
      */
-    private function alleNutzer(): array
+    protected function alleNutzer(): array
     {
         $nutzer = [];
 
@@ -208,7 +208,7 @@ class MoodleApi
         return array_values($nutzer);
     }
 
-    private function get(string $url): array
+    protected function get(string $url): array
     {
         $ch = curl_init($url);
         curl_setopt_array($ch, [

@@ -6,6 +6,9 @@ $nachname   = htmlspecialchars($benutzer['nachname'] ?? '');
 $rollen     = $benutzer['rollen'] ?? [];
 $nurSchueler = !array_intersect($rollen, ['admin', 'stufenleitung', 'lehrkraft'])
                && in_array('schueler', $rollen, true);
+
+// Änderungszeit als Versionsparameter: nach einem Update laden Browser CSS/JS neu statt aus dem Cache
+$assetVersion = static fn (string $datei): int => (int) @filemtime(__DIR__ . '/../assets/' . $datei);
 ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -13,7 +16,7 @@ $nurSchueler = !array_intersect($rollen, ['admin', 'stufenleitung', 'lehrkraft']
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Klausurplan</title>
-    <link rel="stylesheet" href="/assets/app.css">
+    <link rel="stylesheet" href="/assets/app.css?v=<?= $assetVersion('app.css') ?>">
 </head>
 <body>
     <?php if (!$nurSchueler): ?>
@@ -30,6 +33,6 @@ $nurSchueler = !array_intersect($rollen, ['admin', 'stufenleitung', 'lehrkraft']
         window.KLAUSURPLAN_ROLLEN = <?= json_encode($rollen, JSON_UNESCAPED_UNICODE) ?>;
         window.KLAUSURPLAN_ME_ID  = <?= (int) ($benutzer['id'] ?? 0) ?>;
     </script>
-    <script src="/assets/app.js"></script>
+    <script src="/assets/app.js?v=<?= $assetVersion('app.js') ?>"></script>
 </body>
 </html>

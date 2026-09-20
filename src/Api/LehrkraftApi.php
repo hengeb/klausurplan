@@ -7,6 +7,7 @@ namespace Klausurplan\Api;
 use Klausurplan\Auth\Session;
 use Klausurplan\Import\KlausurPasteParser;
 use Klausurplan\Models\Database;
+use Klausurplan\Support\Prozess;
 use RuntimeException;
 
 class LehrkraftApi
@@ -346,7 +347,7 @@ class LehrkraftApi
 
     /**
      * Generiert eine CSV-Vorlage mit allen Kursen eines Halbjahres (?halbjahr_id=X)
-     * und sendet sie als Datei-Download. Ohne Angabe: das aktuelle Halbjahr. Endet mit exit().
+     * und sendet sie als Datei-Download. Ohne Angabe: das aktuelle Halbjahr. Beendet die Anfrage.
      */
     public static function downloadVorlage(): never
     {
@@ -404,7 +405,7 @@ class LehrkraftApi
         }
 
         fclose($out);
-        exit();
+        Prozess::beenden();
     }
 
     // ------------------------------------------------------------------

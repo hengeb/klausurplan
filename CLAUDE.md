@@ -1,699 +1,184 @@
 # Klausurplan – Projektanweisungen für Claude Code
 
-## Projektüberblick
+Klausurtermine und Anwesenheit für die Oberstufe eines deutschen Gymnasiums. Läuft als
+**LTI-1.3-Tool in Moodle** (Login nur über Moodle), PHP + MariaDB, Vanilla-JS-Frontend,
+DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [README.md](README.md).
 
-Dieses Tool verwaltet Klausurtermine an einer deutschen Schule (Oberstufe/Gymnasium).
-Es wird per **LTI 1.3** in Moodle eingebunden, läuft auf einem PHP-Schulserver und ist
-**datenschutzkonform** (kein externes CDN, keine Analytics, DSGVO).
+## Randbedingungen (nicht verhandelbar)
 
-Die Authentifizierung erfolgt ausschließlich über Moodle/LTI. Das Tool nutzt
-die Moodle REST API für den Nutzerdaten-Import (E-Mail-Adressen, Zuordnung).
+- **PHP 8.5**, `declare(strict_types=1)` überall, Rückgabe-/Parametertypen konsequent.
+- **MariaDB**, PDO mit **Prepared Statements immer** (nie Strings konkatenieren). SQL soll auch auf MySQL 8 laufen.
+- **Kein CDN, keine externen Requests aus dem Browser.** Alle Assets liegen lokal in `public/assets/`.
+- **Server: kein SSH, keine CLI, kein Docker.** Alles Administrative läuft über Web-Seiten
+  (`public/setup.php`) oder wird manuell hochgeladen (`vendor/` wird lokal gebaut, Migrationen
+  per phpMyAdmin). Nichts entwerfen, das Shell-Zugriff auf dem Server voraussetzt.
+- `.env` liegt **oberhalb von `public/`**, wird manuell angelegt, nie committet; phpdotenv lädt sie
+  bedingungslos (`createImmutable()->load()`). Wichtig: Immutable → echte Umgebungsvariablen haben Vorrang.
+- Kommentare auf Deutsch. **UI-Texte gendergerecht** („Schüler*innen“, „Teilnehmende“, „Lehrkraft“,
+  „Administrator*in“); in PHP-Code und DB-Bezeichnern nicht nötig.
+- Fehler: Exceptions → JSON `{"fehler": "..."}` mit HTTP-Status. Handler setzen 403/404/409/422 selbst
+  (`http_response_code()`) und werfen dann `RuntimeException`; der Router behält diesen Status (sonst 400).
+  Unerwartete Fehler → 500 ohne Details (nur im Error-Log).
 
----
+## Arbeitsweise & Tests
 
-## Technische Rahmenbedingungen
+**Nach jeder Änderung zuerst die Unit-Tests, dann erst Integrationstests im Wegwerf-Container:**
 
-| Parameter | Wert |
-|---|---|
-| PHP | 8.5 |
-| Datenbank | MariaDB (PDO, prepared statements **immer**) |
-| LTI | 1.3 via `celtic-project/LTI-PHP` |
-| E-Mail | PHPMailer via SMTP |
-| Frontend | Statisches HTML + Vanilla JS (fetch API → REST-artige PHP-Endpunkte) |
-| Paketmanager | Composer |
-| Deployment | Schulhomepageserver, kein Docker |
+| Befehl | Zweck | Dauer |
+|---|---|---|
+| `vendor/bin/phpunit --testsuite Unit` (`composer test`) | PHP-Unit-Tests mit `FakePdo`, ohne DB | < 1 s |
+| `node --test tests/js/` (`npm test`) | Frontend-Tests (jsdom) | ~3 s |
+| `vendor/bin/phpunit --testsuite Integration` | lädt nur die Integrationsklassen (ohne DB alle „skipped“) – fängt Syntax-/Ladefehler | < 1 s |
+| `bin/test-integration.sh` | Integrationstests gegen Wegwerf-MariaDB in Docker | ~40 s |
+| `bin/test-integration.sh --coverage` | dito, Unit + Integration mit Coverage (pcov, Bericht in `coverage/`) | ~40 s |
+| `DB_IMAGE=mysql:8.4 bin/test-integration.sh` | dasselbe gegen MySQL | ~45 s |
 
-**Kein externes CDN.** Alle Assets lokal. Kein Bootstrap über CDN.
-Minimales, funktionales CSS – kein Framework zwingend, aber sauberes eigenes CSS.
-
-**`.env` liegt oberhalb von `public/`** und ist damit nicht per HTTP erreichbar. Auf dem Server wird sie manuell angelegt (nicht im Git). phpdotenv lädt sie in allen Umgebungen gleich.
-
----
+- Lokal fehlt `pdo_mysql`; deshalb Docker (`tests/docker/Dockerfile`, PHP 8.5 + pcov). Es wird nur das
+  Projektverzeichnis eingebunden. **Die echte lokale `.env`, `SchuelerLeistungsdaten.dat` und `private.key`
+  nie lesen, ausgeben oder in Tests verwenden.**
+- **Neuer/geänderter Code bekommt Tests.** Unit-Tests prüfen Logik und *welche* Statements gesendet werden;
+  ob das SQL stimmt, prüfen nur die Integrationstests → SQL-Änderungen immer dort absichern.
+- Stand: 339 PHP-Unit-, 83 Integrations-, 38 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
+  ≈ 99,85 % (offen nur `exit`, private Konstruktoren). Nicht abgedeckt: `public/*.php`-Einstiegsskripte, `setup.php`, `bin/`.
+- Test-Nahtstellen im Produktivcode (nicht entfernen): `Support\Prozess::beenden()` statt `exit`,
+  `Database::setInstance()`, `Router::jsonBody($roh)`, `MoodleApi::alleNutzer()/get()` (protected).
+- Stolpersteine in Tests: `proc_open` verwirft **leere** Umgebungsvariablen (deshalb `SMTP_ENCRYPTION=none`);
+  DB-relative Zeiten (`NOW()`) laufen in UTC → in Tests `gmdate()`; PHPUnit fängt `error_log()` als
+  Testausgabe ab (`expectOutputRegex`); `fputcsv()` braucht den `escape`-Parameter (PHP 8.4+ Deprecation).
+- Für Frontend-Änderungen zusätzlich `node --check public/assets/app.js`.
 
 ## Verzeichnisstruktur
 
 ```
-klausurplan/
-├── CLAUDE.md                  ← diese Datei
-├── composer.json
-├── .env.example               ← Vorlage, niemals .env committen
-├── .gitignore
-│
-├── public/                    ← Document Root des Webservers
-│   ├── index.php              ← Einstiegspunkt, Router
-│   ├── lti-launch.php         ← LTI 1.3 Launch-Handler
-│   ├── api.php                ← REST-API-Einstiegspunkt
-│   ├── assets/
-│   │   ├── app.css
-│   │   └── app.js
-│   └── templates/             ← HTML-Shells (JS lädt Daten nach)
-│       ├── layout.php
-│       ├── admin.html
-│       ├── stufenleitung.html
-│       ├── lehrkraft.html
-│       └── schueler.html
-│
-├── src/
-│   ├── Auth/
-│   │   ├── LtiHandler.php     ← LTI 1.3 Launch, Session-Initialisierung
-│   │   ├── Session.php        ← Session-Wrapper, Rollenprüfung
-│   │   └── MoodleApi.php      ← Moodle REST API Client (Nutzerimport)
-│   │
-│   ├── Api/                   ← API-Controller (JSON in/out)
-│   │   ├── Router.php
-│   │   ├── AdminApi.php
-│   │   ├── StufenleitungApi.php
-│   │   ├── LehrkraftApi.php
-│   │   └── SchuelerApi.php
-│   │
-│   ├── Import/
-│   │   ├── GomstImporter.php  ← GoMST .dat Datei einlesen
-│   │   └── KlausurPasteParser.php  ← Tab-getrenntes Excel-Paste parsen
-│   │
-│   ├── Mail/
-│   │   ├── Mailer.php         ← PHPMailer-Wrapper
-│   │   └── EmailTemplates.php ← HTML-Mail-Vorlagen
-│   │
-│   ├── Models/                ← Datenbankzugriff via PDO
-│   │   ├── Database.php       ← PDO-Singleton
-│   │   ├── Benutzer.php
-│   │   ├── Kurs.php
-│   │   ├── Klausur.php
-│   │   ├── Nachschreibtermin.php
-│   │   ├── Anwesenheit.php
-│   │   └── Benachrichtigung.php
-│   │
-│   └── Cron/
-│       └── erinnerungen_senden.php  ← CLI-Script für Cronjob
-│
-└── migrations/
-    ├── 001_schema.sql               ← vollständiges aktuelles Schema (Neuinstallation)
-    ├── 002_remove_raum.sql          ← Delta für bestehende Installationen
-    └── 003_zuordnungen_extern.sql   ← Delta: dauerhafte Zuordnungen, externe Lehrkräfte, SL-Mails
+public/                    Document Root
+  index.php                Einstieg: Token-Seiten (ohne Login) und Layout je Rolle
+  api.php                  REST-Einstieg, alle Routen (Router), Rollen je Route
+  lti-launch.php           LTI-1.3-Launch (Moodle → Tool)
+  lti-jwks.php             öffentlicher Schlüssel (JWKS) für Moodle
+  setup.php                Setup-Assistent im Browser (SETUP_TOKEN in .env), danach Token entfernen
+  .htaccess                Rewrites (/api/* → api.php), CSP + nosniff (mod_headers)
+  assets/app.js            gesamtes Frontend (Views, Dialoge, apiFetch), assets/app.css
+  templates/               layout.php (Shell, setzt window.KLAUSURPLAN_ROLLEN / _ME_ID), Hinweisseiten
+src/
+  Api/                     Router, AdminApi, StufenleitungApi, LehrkraftApi, AnwesenheitApi, SchuelerApi, MeController
+  Auth/                    LtiHandler (Launch, Nutzer-Sync), Session (Rollenprüfung), MoodleApi (REST-Nutzerimport)
+  Import/                  GomstImporter, KlausurPasteParser
+  Mail/                    Mailer (PHPMailer/SMTP), EmailTemplates
+  Models/                  Database (PDO-Singleton), Zuordnung (dauerhafte Zuordnungen + Matching)
+  Support/Prozess.php      zentrales Beenden der Anfrage (Test-Nahtstelle für exit)
+  Cron/erinnerungen_senden.php   CLI-Cronjob (stündlich)
+migrations/                001_schema.sql = vollständiges aktuelles Schema; 00N_*.sql = Deltas für bestehende Installationen
+bin/                       test-integration.sh; generate-lti-key.php / register-platform.php (CLI-Alternativen zu setup.php)
+tests/                     Unit/, Integration/, js/, Support/ (FakePdo, Fixtures, SmtpSenke, MoodleAttrappe), docker/
 ```
 
----
+Die statischen `*Api`-Klassen enthalten die Fachlogik je Rolle (`Session::requireRolle(...)` am Anfang jeder Methode).
+Es gibt keine globalen Variablen außer dem DB-Singleton.
 
-## Datenbankschema
+## Rollen & Rechte
 
-**Namenskonvention:** Deutsch, snake_case, Tabellen im Plural.
-
-```sql
--- migrations/001_schema.sql
-
-CREATE TABLE benutzer (
-    id              INT AUTO_INCREMENT PRIMARY KEY,
-    moodle_id       VARCHAR(255) UNIQUE NOT NULL,
-    vorname         VARCHAR(100) NOT NULL,
-    nachname        VARCHAR(100) NOT NULL,
-    email           VARCHAR(255),
-    kuerzel         VARCHAR(20),        -- Paraphe, z.B. "SZ" aus "Gebauer (SZ)"
-    zuletzt_gesehen DATETIME,
-    erstellt_am     DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE rollen (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    benutzer_id INT NOT NULL,
-    rolle       ENUM('admin','stufenleitung','lehrkraft','schueler') NOT NULL,
-    FOREIGN KEY (benutzer_id) REFERENCES benutzer(id) ON DELETE CASCADE,
-    UNIQUE KEY (benutzer_id, rolle)
-);
-
-CREATE TABLE stufen (
-    id         INT AUTO_INCREMENT PRIMARY KEY,
-    name       VARCHAR(20) NOT NULL,   -- z.B. "Q2", "Q1", "EF"
-    schuljahr  VARCHAR(9)  NOT NULL,   -- z.B. "2023/2024"
-    UNIQUE KEY (name, schuljahr)
-);
-
-CREATE TABLE stufenleitungen (
-    benutzer_id INT NOT NULL,
-    stufe_id    INT NOT NULL,
-    PRIMARY KEY (benutzer_id, stufe_id),
-    FOREIGN KEY (benutzer_id) REFERENCES benutzer(id) ON DELETE CASCADE,
-    FOREIGN KEY (stufe_id)    REFERENCES stufen(id)   ON DELETE CASCADE
-);
-
--- Import-Kontext: eine Datei = ein Halbjahr (ein Import-Lauf)
-CREATE TABLE halbjahre (
-    id            INT AUTO_INCREMENT PRIMARY KEY,
-    stufe_id      INT NOT NULL,
-    abschnitt     TINYINT NOT NULL,   -- 1 oder 2
-    importiert_am DATETIME DEFAULT CURRENT_TIMESTAMP,
-    importiert_von INT,
-    FOREIGN KEY (stufe_id)       REFERENCES stufen(id)    ON DELETE RESTRICT,
-    FOREIGN KEY (importiert_von) REFERENCES benutzer(id)  ON DELETE SET NULL
-);
-
-CREATE TABLE kurse (
-    id             INT AUTO_INCREMENT PRIMARY KEY,
-    halbjahr_id    INT NOT NULL,
-    kurs_kuerzel   VARCHAR(50) NOT NULL,   -- z.B. "SP_Q2_GK1_SZ"
-    fach_kuerzel   VARCHAR(10) NOT NULL,   -- z.B. "SP"
-    kursart        ENUM('GKS','LK1','LK2','AB3','AB4') NOT NULL,
-    lehrer_kuerzel VARCHAR(20),
-    lehrer_id      INT,                    -- nach Zuordnung gesetzt
-    anzeigename    VARCHAR(150),           -- z.B. "Q2 Sport GK 1 SZ"
-    FOREIGN KEY (halbjahr_id) REFERENCES halbjahre(id) ON DELETE CASCADE,
-    FOREIGN KEY (lehrer_id)   REFERENCES benutzer(id)  ON DELETE SET NULL,
-    UNIQUE KEY (halbjahr_id, kurs_kuerzel)
-);
-
--- Klausurrelevante Kursarten: GKS, LK1, LK2, AB3, AB4
--- GKM = Grundkurs Mündlich → KEIN Import
--- ZK = Zusatzkurs → KEIN Import (wie GKM behandeln)
-
-CREATE TABLE kurs_schueler (
-    id              INT AUTO_INCREMENT PRIMARY KEY,
-    kurs_id         INT NOT NULL,
-    name_roh        VARCHAR(200) NOT NULL,  -- "Mustermann|Max" aus GoMST
-    schueler_id     INT,                    -- nach Zuordnung gesetzt
-    FOREIGN KEY (kurs_id)    REFERENCES kurse(id)    ON DELETE CASCADE,
-    FOREIGN KEY (schueler_id) REFERENCES benutzer(id) ON DELETE SET NULL,
-    UNIQUE KEY (kurs_id, name_roh)
-);
-
-CREATE TABLE klausuren (
-    id           INT AUTO_INCREMENT PRIMARY KEY,
-    kurs_id      INT NOT NULL,
-    klausur_nr   TINYINT DEFAULT 1,        -- welche Klausur im Halbjahr
-    termin_datum DATE,                     -- nullable: noch nicht festgelegt
-    termin_uhrzeit TIME,
-    dauer_minuten SMALLINT,
-    raum         VARCHAR(100),
-    erstellt_am  DATETIME DEFAULT CURRENT_TIMESTAMP,
-    erstellt_von INT,
-    FOREIGN KEY (kurs_id)    REFERENCES kurse(id)    ON DELETE CASCADE,
-    FOREIGN KEY (erstellt_von) REFERENCES benutzer(id) ON DELETE SET NULL
-);
-
-CREATE TABLE nachschreibtermine (
-    id             INT AUTO_INCREMENT PRIMARY KEY,
-    termin_datum   DATE,
-    termin_uhrzeit TIME,
-    raum           VARCHAR(100),
-    bemerkung      TEXT,
-    erstellt_am    DATETIME DEFAULT CURRENT_TIMESTAMP,
-    erstellt_von   INT,
-    FOREIGN KEY (erstellt_von) REFERENCES benutzer(id) ON DELETE SET NULL
-);
-
--- M:N: mehrere Klausuren können denselben Nachschreibtermin haben
-CREATE TABLE nachschreib_zuordnungen (
-    klausur_id           INT NOT NULL,
-    nachschreibtermin_id INT NOT NULL,
-    PRIMARY KEY (klausur_id, nachschreibtermin_id),
-    FOREIGN KEY (klausur_id)           REFERENCES klausuren(id)           ON DELETE CASCADE,
-    FOREIGN KEY (nachschreibtermin_id) REFERENCES nachschreibtermine(id)  ON DELETE CASCADE
-);
-
-CREATE TABLE anwesenheiten (
-    id               INT AUTO_INCREMENT PRIMARY KEY,
-    klausur_id       INT NOT NULL,
-    kurs_schueler_id INT NOT NULL,
-    status           ENUM('anwesend','fehlend','ausstehend') DEFAULT 'ausstehend',
-    entschuldigt     BOOLEAN DEFAULT FALSE,
-    kommentar        TEXT,
-    erfasst_von      INT,
-    erfasst_am       DATETIME,
-    geaendert_von    INT,
-    geaendert_am     DATETIME,
-    FOREIGN KEY (klausur_id)       REFERENCES klausuren(id)    ON DELETE CASCADE,
-    FOREIGN KEY (kurs_schueler_id) REFERENCES kurs_schueler(id) ON DELETE CASCADE,
-    FOREIGN KEY (erfasst_von)      REFERENCES benutzer(id)     ON DELETE SET NULL,
-    FOREIGN KEY (geaendert_von)    REFERENCES benutzer(id)     ON DELETE SET NULL,
-    UNIQUE KEY (klausur_id, kurs_schueler_id)
-);
-
-CREATE TABLE nachschreib_anwesenheiten (
-    id                   INT AUTO_INCREMENT PRIMARY KEY,
-    nachschreibtermin_id INT NOT NULL,
-    kurs_schueler_id     INT NOT NULL,
-    status               ENUM('anwesend','fehlend','ausstehend') DEFAULT 'ausstehend',
-    entschuldigt         BOOLEAN DEFAULT FALSE,
-    kommentar            TEXT,
-    erfasst_von          INT,
-    erfasst_am           DATETIME,
-    FOREIGN KEY (nachschreibtermin_id) REFERENCES nachschreibtermine(id)  ON DELETE CASCADE,
-    FOREIGN KEY (kurs_schueler_id)     REFERENCES kurs_schueler(id)       ON DELETE CASCADE,
-    FOREIGN KEY (erfasst_von)          REFERENCES benutzer(id)            ON DELETE SET NULL,
-    UNIQUE KEY (nachschreibtermin_id, kurs_schueler_id)
-);
-
-CREATE TABLE email_benachrichtigungen (
-    id           INT AUTO_INCREMENT PRIMARY KEY,
-    klausur_id   INT NOT NULL,
-    empfaenger_id INT NOT NULL,
-    typ          ENUM('erstmeldung','erinnerung') NOT NULL,
-    token        VARCHAR(64) NOT NULL UNIQUE,  -- zufälliger Token für den Link
-    gesendet_am  DATETIME,
-    beantwortet_am DATETIME,
-    FOREIGN KEY (klausur_id)    REFERENCES klausuren(id) ON DELETE CASCADE,
-    FOREIGN KEY (empfaenger_id) REFERENCES benutzer(id)  ON DELETE CASCADE
-);
-
--- Fächerbezeichnungen (pflegbar durch Admin, vorbelegt)
-CREATE TABLE fach_bezeichnungen (
-    kuerzel     VARCHAR(10) PRIMARY KEY,
-    bezeichnung VARCHAR(100) NOT NULL
-);
-```
-
-```sql
--- migrations/002_faecher_lookup.sql
--- NRW Oberstufe – Standardbezeichnungen
-
-INSERT INTO fach_bezeichnungen (kuerzel, bezeichnung) VALUES
-('D',   'Deutsch'),
-('E',   'Englisch'),
-('F',   'Französisch'),
-('L',   'Latein'),
-('GR',  'Griechisch'),
-('SP',  'Spanisch'),
-('NL',  'Niederländisch'),
-('RU',  'Russisch'),
-('IT',  'Italienisch'),
-('M',   'Mathematik'),
-('PH',  'Physik'),
-('CH',  'Chemie'),
-('BI',  'Biologie'),
-('IF',  'Informatik'),
-('GE',  'Geschichte'),
-('EK',  'Erdkunde'),
-('SW',  'Sozialwissenschaften'),
-('PL',  'Philosophie'),
-('PA',  'Pädagogik'),
-('KU',  'Kunst'),
-('MU',  'Musik'),
-('LI',  'Literatur'),
-('SP',  'Sport'),
-('ER',  'Evangelische Religionslehre'),
-('KR',  'Katholische Religionslehre'),
-('PS',  'Psychologie'),
-('RK',  'Rechtskunde'),
-('WI',  'Wirtschaft'),
-('VO',  'Vokalpraktischer Kurs'),
-('ZG',  'Zusatzkurs Gesellschaft'),
-('ZN',  'Zusatzkurs Naturwissenschaften')
-ON DUPLICATE KEY UPDATE bezeichnung = VALUES(bezeichnung);
-```
-
----
-
-## GoMST-Import
-
-**Dateiformat:** Pipe-getrennt (`|`), UTF-8 mit BOM (`utf-8-sig`), CRLF-Zeilenenden.
-
-**Relevante Spalten:**
-
-| Spalte | Verwendung |
-|---|---|
-| `Nachname` + `Vorname` | Schüleridentifikation |
-| `Fach` | Fachkürzel |
-| `Fachlehrer` | Lehrerkürzel (Paraphe) |
-| `Kursart` | Filterkriterium |
-| `Kurs` | Eindeutige Kursbezeichnung |
-| `Jahrgang` | Stufe (z.B. Q2) |
-| `Abschnitt` | Schulhalbjahr (1 oder 2) |
-| `Jahr` | Schuljahr (z.B. 2023 = 2023/2024) |
-
-**Klausurrelevante Kursarten:** `GKS`, `LK1`, `LK2`, `AB3`, `AB4`
-**Nicht klausurrelevant (überspringen):** `GKM`, `ZK`
-
-**Importlogik (GomstImporter.php):**
-
-1. Datei einlesen, BOM und CRLF bereinigen
-2. Pro Zeile: Kursart prüfen – `GKM` oder `ZK` → überspringen
-3. Stufe aus `Jahrgang` ermitteln oder anlegen (`stufen`)
-4. Halbjahr anlegen (`halbjahre`)
-5. Kurs anlegen oder aktualisieren (`kurse`) – `kurs_kuerzel` ist eindeutig pro Halbjahr
-6. Schüler dem Kurs zuordnen (`kurs_schueler`)
-7. **Bei erneutem Import derselben Daten:**
-   - Kurse, die in der neuen Datei enthalten sind → Schülerliste vollständig ersetzen
-   - Schüler, die nicht mehr enthalten sind → aus `kurs_schueler` entfernen
-   - Bereits erfasste Anwesenheitsdaten dabei NICHT löschen (Klausuren bleiben)
-8. Automatisches Namensmatching nach Import (siehe Zuordnungslogik)
-
-**Anzeigename generieren** aus `kurs_kuerzel` (z.B. `SP_Q2_GK1_SZ`):
-```
-[FACH]_[STUFE]_[KURSART+NR]_[KUERZEL]
-→ Fachname aus fach_bezeichnungen
-→ Kursart: GKS → "GK", LK1/LK2 → "LK", AB3/AB4 → "AB"
-→ Nummer aus dem Kursart-Teil extrahieren (GK1 → 1, LK2 → 2)
-→ Ergebnis: "Q2 Sport GK 1 SZ"
-```
-
----
-
-## Klausuren anlegen: Excel-Paste
-
-**Ablauf:**
-1. Nutzer markiert in Excel alle Zeilen inkl. Kopfzeile (Strg+A), kopiert (Strg+C)
-2. Klick in Textarea im Browser, Strg+V
-3. JS erkennt tab-getrennten Text, parsed ihn clientseitig
-4. Vorschau-Tabelle wird angezeigt, Nutzer bestätigt
-5. JS sendet JSON an API
-
-**Erwartete Spaltenüberschriften (case-insensitive, Reihenfolge egal):**
-`Kurs`, `Datum`, `Uhrzeit`, `Dauer`, `Raum`
-
-- `Kurs` = exaktes `kurs_kuerzel` aus GoMST
-- `Datum` = deutsches Format: `31.01.2024` oder leer
-- `Uhrzeit` = `08:00` oder `8:00` oder leer
-- `Dauer` = Minuten als Zahl oder leer
-- `Raum` = beliebiger String oder leer
-
-Fehlende Datums/Zeit/Dauer/Raum-Felder sind erlaubt → `NULL` in DB.
-Klausuren ohne Datum werden in der Übersicht **unterhalb** datierter Klausuren angezeigt.
-
-**Direkte Anlage im Tool:** Formular mit Dropdown (Kurs) + Datumsfelder.
-Mehrere Klausuren pro Kurs möglich (Klausur 1, 2, …).
-
----
-
-## LTI 1.3 Integration
-
-**Library:** `celtic-project/LTI-PHP` (via Composer)
-
-**Wichtige LTI-Claims:**
-
-```
-Rollen-Claim: https://purl.imsglobal.org/spec/lti/claim/roles
-Moodle-Systemadmin-Rolle: http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator
-
-Name: given_name, family_name
-E-Mail: email
-Moodle User ID: sub (oder custom claim)
-```
-
-**Bootstrapping:** Wer mit Moodle-Systemadmin-Rolle einloggt, wird automatisch
-als `admin` in `rollen` eingetragen (falls noch nicht vorhanden).
-
-**Lehrerkürzel aus Moodle-Nachname extrahieren:**
-Moodle speichert z.B. `Gebauer (GB)` → Regex: `/\(([A-ZÄÖÜa-zäöü]+)\)$/`
-→ Kürzel `GB` in `benutzer.kuerzel` speichern.
-
----
-
-## Moodle REST API
-
-Endpunkt: `{MOODLE_URL}/webservices/rest/server.php`
-
-```php
-// Alle Nutzer laden
-$params = [
-    'wstoken'    => MOODLE_API_TOKEN,
-    'wsfunction' => 'core_user_get_users',
-    'moodlewsrestformat' => 'json',
-    'criteria[0][key]'   => 'auth',
-    'criteria[0][value]' => 'ldap',  // oder 'manual'
-];
-```
-
-In `.env`:
-```
-MOODLE_URL=https://moodle.schule.de
-MOODLE_API_TOKEN=xxxx
-```
-
----
-
-## Namensmatching (GoMST ↔ Moodle-Benutzer)
-
-**Dauerhafte Zuordnungen:** Manuelle Zuordnungen werden personenbezogen in
-`schueler_zuordnungen` (GoMST-Name → Moodle-Konto) bzw. `lehrer_zuordnungen`
-(Lehrerkürzel → Lehrkraft) gespeichert – nicht an Kursen. Sie überleben das Löschen von Kursen
-und Halbjahren und werden bei jedem Import (und beim Hinzufügen von Prüflingen) zuerst
-angewendet; erst danach greift das automatische Matching (`Models/Zuordnung.php`).
-`benutzer_id = NULL` bedeutet „bewusst aufgehoben“ – dann wird nicht automatisch neu zugeordnet.
-Zuordnungen (auch automatische) lassen sich in der Zuordnungs-Ansicht ändern und aufheben.
-
-**Automatisch bei Import** (nach den gespeicherten Zuordnungen):
-1. Vollständiger Name aus GoMST: `Nachname Vorname` (z.B. `Mustermann Max`)
-2. Vergleich mit `benutzer.nachname + ' ' + benutzer.vorname`
-3. Bei exakter Übereinstimmung (case-insensitive, trim): direkt zuordnen
-4. Sonst: In `kurs_schueler.schueler_id` bleibt `NULL`
-
-**Manuell durch Stufenleitung/Admin:**
-- Seite zeigt zwei Listen:
-  - Links: nicht zugeordnete GoMST-Einträge (`schueler_id IS NULL`)
-  - Rechts: nicht zugeordnete Moodle-Benutzer (keiner Klausur zugeordnet)
-- Per Dropdown oder Drag & Drop zusammenführen
-- Auch Lehrer: `kurse.lehrer_id IS NULL` → Kürzel-Matching versuchen, sonst manuell
-- **Externe Lehrkräfte** (kein Moodle-Konto, z.B. Klausur an anderer Schule): werden mit Name,
-  Kürzel und E-Mail angelegt (`benutzer.extern = 1`, Platzhalter-`moodle_id` `extern:…`, Rolle
-  `lehrkraft`). Sie können sich nicht anmelden, erhalten aber die Anwesenheits-Mails samt
-  Token-Links. Der Moodle-Sync fasst sie nicht an.
-
-**Lehrerkürzel-Matching:**
-- GoMST-Spalte `Fachlehrer` enthält die Paraphe (z.B. `SZ`)
-- `benutzer.kuerzel` (aus LTI-Login extrahiert) mit GoMST-`Fachlehrer` vergleichen
-
----
-
-## Rollen & Berechtigungen
+Rollen (`rollen`-Tabelle, mehrere je Person möglich): `admin`, `stufenleitung`, `lehrkraft`, `schueler`.
+Sie stehen in der PHP-Session (Änderung wirkt erst nach neuem Login). Wer sich in Moodle als
+Systemadministrator*in anmeldet, wird automatisch `admin` (Bootstrapping); neue Nutzer*innen starten als `schueler`.
 
 | Aktion | admin | stufenleitung | lehrkraft | schueler |
 |---|:---:|:---:|:---:|:---:|
-| Rollen zuweisen | ✓ | – | – | – |
-| Stufen verwalten | ✓ | – | – | – |
-| Stufenleitung zuweisen | ✓ | – | – | – |
-| GoMST importieren | ✓ | ✓* | – | – |
-| Nutzerzuordnung manuell | ✓ | ✓* | – | – |
-| Klausuren anlegen/bearbeiten | ✓ | ✓* | – | – |
-| Nachschreibtermine anlegen | ✓ | ✓* | – | – |
-| Anwesenheit eintragen/korrigieren | ✓ | ✓* | ✓** | – |
-| Entschuldigungen eintragen | ✓ | ✓* | – | – |
-| E-Mail manuell auslösen | ✓ | ✓* | – | – |
-| Daten löschen | ✓ | ✓* | – | – |
-| Eigene Klausuren + Schüler sehen | ✓ | ✓ | ✓ | – |
-| Eigene Klausurtermine sehen | ✓ | ✓ | ✓ | ✓ |
+| Rollen zuweisen, Fächer pflegen, Moodle-Sync | ✓ | – | – | – |
+| GoMST importieren, Zuordnungen, externe Lehrkräfte | ✓ | ✓ (alle Stufen) | – | – |
+| Halbjahre/Kurse anlegen, Klausuren anlegen/ändern/löschen, Nachschreibtermine | ✓ | ✓ (**alle** Stufen) | – | – |
+| Anwesenheit eintragen | ✓ | ✓ | nur eigene Kurse | – |
+| Entschuldigen | ✓ | ✓ | – | – |
+| Anwesenheits-Mail manuell auslösen (✉️) | ✓ | UI nur für eigene Stufen | – | – |
+| Eigene Klausuren sehen | ✓ | ✓ | ✓ | ✓ (nur eigene Termine) |
 
-`*` Stufenleitung nur für ihre eigenen Stufen – **Ausnahmen:** GoMST-Import, Nutzerzuordnung
-und Klausuren anlegen/bearbeiten gelten für *alle* Stufen.
-`**` Lehrkraft nur für ihre eigenen Kurse/Klausuren
+**Zuständigkeit der Stufenleitung** (`stufenleitungen`): Wer die Rolle hat, verwaltet selbst, für welche Stufen
+sie/er zuständig ist („Meine Stufen“, `GET/PUT/DELETE /api/stufenleitung/meine-stufen[/{id}]`) – nie der Admin.
+Es kann keine Stufe zugewiesen sein. Beim GoMST-Import wird man automatisch für die importierten Stufen
+zuständig (Antwort `stufenleitung_neu`, im UI per Klick abgebbar; Admin ohne SL-Rolle: nicht). Eine neue
+Stufe erbt die Zuständigen der Vorgängerstufe (EF←Q2, Q1←EF, Q2←Q1 des Vorjahres). Die Zuständigkeit steuert:
+1. die Standard-Klausurliste (`GET /api/klausuren`; `?alle=1` zeigt alle Stufen; eine Liste je Stufe/Halbjahr),
+2. Vorauswahl von Stufe/Halbjahr beim Anlegen und im Excel-Import,
+3. den ✉️-Button und die **Übersichtsmail an die Stufenleitung** (siehe E-Mail).
+Entzug der Rolle `stufenleitung` löscht die Zuordnungen.
 
-**Stufenleitung – Zuständigkeit:** Wer die Rolle `stufenleitung` hat, verwaltet selbst, für
-welche Stufen sie/er zuständig ist (Self-Service, „Meine Stufen“); Admins müssen das nicht tun.
-Es kann auch keine Stufe zugewiesen sein. Beim GoMST-Import wird man automatisch für die
-importierten Stufen zuständig (Anzeige im Ergebnis, Abgeben per Klick). Die Zuständigkeit
-bestimmt, welche Klausuren standardmäßig in der Liste stehen (eine Liste je Stufe/Halbjahr;
-„Alle Stufen anzeigen“ blendet den Rest ein), wer die manuelle Anwesenheits-Mail auslösen kann
-und wer die Übersichtsmail (siehe E-Mail-System) erhält.
+## Datenmodell (Details: `migrations/001_schema.sql`)
 
-**Rollen schließen sich nicht aus.** Eine Person kann gleichzeitig `lehrkraft`
-UND `stufenleitung` sein. Die UI zeigt dann alle verfügbaren Bereiche.
+Namen deutsch, snake_case, Tabellen im Plural.
+- `benutzer` (`moodle_id` eindeutig, `kuerzel`, `email`, `stufe`, `extern`), `rollen`.
+- `stufen` (name + schuljahr) → `halbjahre` (stufe, abschnitt 1/2) → `kurse` (kurs_kuerzel eindeutig **je Halbjahr**,
+  kursart `LK|GK`, `lehrer_kuerzel`, `lehrer_id`, `anzeigename`) → `kurs_schueler` (`name_roh` = „Nachname|Vorname“,
+  `schueler_id`, GoMST-`kursart`) und `klausuren` (klausur_nr, termin_datum/-uhrzeit, dauer_minuten; alles außer Kurs nullable).
+- `anwesenheiten` (status `anwesend|fehlend|ausstehend`, `entschuldigt` NULL=offen/1/0), `nachschreibtermine`,
+  `nachschreib_zuordnungen` (M:N Klausur↔Termin), `nachschreib_anwesenheiten`.
+- `email_benachrichtigungen` (Token, typ `erstmeldung|erinnerung`, `beantwortet_am`), `stufenleitung_erinnerungen`.
+- `schueler_zuordnungen` / `lehrer_zuordnungen`: **dauerhafte** Zuordnung GoMST-Name/Kürzel → Konto (siehe unten).
+- `fach_bezeichnungen` (Kürzel → Name, vom Admin pflegbar), `lti2_*` (LTI-Bibliothek).
+- Kein Raum-Feld (bewusst entfernt).
 
----
+**Migrationen:** `001_schema.sql` ist immer der vollständige Endstand (Neuinstallation). Jede Änderung zusätzlich als
+neues, möglichst idempotentes Delta `00N_beschreibung.sql` (MariaDB **und** MySQL: kein `ADD COLUMN IF NOT EXISTS`,
+stattdessen `information_schema`-Prüfung + `PREPARE`). Neue Migration **auch in die Tabelle im README (Abschnitt „Update“)
+eintragen**. Tests: `SchemaMigrationTest`.
 
-## E-Mail-System
+## Kernlogik
 
-**Automatisch:** Cronjob (`cron/erinnerungen_senden.php`) läuft stündlich.
-- Prüft: Klausur hat `termin_datum` + `termin_uhrzeit`, die in der Vergangenheit liegt
-- Noch keine `email_benachrichtigungen` vom Typ `erstmeldung` für diese Klausur?
-  → Mail senden
-- Erstmeldung gesendet, aber nach 7 Tagen noch keine Antwort?
-  → Erinnerungsmail senden (einmalig)
+**GoMST-Import** (`Import/GomstImporter`): Pipe-getrennt, UTF-8 mit BOM, CRLF. Spalten `Nachname, Vorname, Fach,
+Fachlehrer, Kursart, Kurs, Jahrgang, Abschnitt, Jahr`. Nur `GKS, LK1, LK2, AB3, AB4` (GKM/ZK übersprungen).
+Legt Stufe/Halbjahr/Kurs/Prüflinge an bzw. aktualisiert; Prüflinge, die nicht mehr in der Datei stehen, werden
+entfernt, **außer** es gibt Anwesenheitsdaten. Anzeigename: „Q2 Sport GK 1 SZ“ aus Kurskürzel + `fach_bezeichnungen`.
 
-**Cron-Eintrag (Beispiel):**
-```
-0 * * * * php /var/www/klausurplan/src/Cron/erinnerungen_senden.php
-```
+**Zuordnung** (`Models/Zuordnung`, UI „Zuordnungen“): Reihenfolge beim Import/Hinzufügen: (1) gespeicherte
+Zuordnung, (2) automatisches Matching (Nachname exakt; Vorname exakt oder erster Vorname; case-insensitive;
+Lehrkräfte über `benutzer.kuerzel`, Moodle-Konten vor externen). Manuelle Zuordnungen gelten **personenbezogen für alle
+Kurse** und überleben das Löschen von Kursen/Halbjahren. `benutzer_id = NULL` = „bewusst aufgehoben“ → kein
+Auto-Matching mehr. Alles (auch Automatisches) ist im UI änder- und aufhebbar.
 
-**Übersicht für die Stufenleitung (ebenfalls Cronjob):** Ist eine Woche nach dem Klausurtermin
-noch keine Anwesenheit erfasst, erhält jede zuständige Stufenleitung (nur für die *eigenen*
-Stufen) einmalig pro Klausur eine Sammelmail (`stufenleitung_erinnerungen` verhindert
-Wiederholungen). Die Fachlehrkräfte werden dadurch nicht zusätzlich angeschrieben.
+**Externe Lehrkräfte** (`benutzer.extern = 1`, `moodle_id = 'extern:…'`, Rolle `lehrkraft`): Lehrkräfte ohne
+Moodle-Konto (z.B. Klausur an anderer Schule). Pflicht: Vor-/Nachname, Kürzel (eindeutig, nach dem Anlegen nicht
+änderbar), E-Mail. Verwaltbar von **jeder** Stufenleitung und Admin, unabhängig von Stufen. Können sich nicht anmelden,
+erhalten aber die Mail-Token-Links. Der Moodle-Sync löscht sie nicht und lässt ihr Kürzel unangetastet.
 
-**Mail-Inhalt (Erstmeldung):**
-```
-Betreff: Anwesenheit Klausur [Kursname] am [Datum]
+**Klausuren:** Einzeln anlegen (Stufe → Kurs, mehrere Klausuren je Kurs) oder Excel-Paste: Spalten `Kurs, Datum
+(TT.MM.JJJJ), Uhrzeit, Dauer` (Kopfzeile Pflicht, Reihenfolge egal; `Anzeigename`/`TN` ignoriert). Die CSV-Vorlage
+(`GET /api/klausuren/vorlage?halbjahr_id=`) und der Import (`POST …/paste-import?halbjahr_id=`) beziehen sich auf ein
+gewähltes Halbjahr, weil Kurskürzel nur je Halbjahr eindeutig sind. Import-Priorität: gleicher Kurs+Datum → aktualisieren;
+Klausur ohne Datum → füllen; sonst neu. Undatierte Klausuren stehen unter den datierten.
 
-Bitte tragen Sie die Anwesenheit für Ihre Klausur ein.
+**E-Mail** (`Cron/erinnerungen_senden.php`, stündlich; `Mail/`): (1) Erstmeldung an die Fachlehrkraft, sobald Termin
+(Datum+Uhrzeit) vergangen; nach 7 Tagen ohne Antwort einmalig eine Erinnerung. Links mit Token
+(`random_bytes(32)`, kein Ablauf): `/anwesenheit/alle-da?token=`, `/anwesenheit/eingabe?token=`,
+`POST /anwesenheit/token-eintrag` – **ohne Login**, Token = Authentifizierung. (2) **Übersicht an die
+Stufenleitung**: eine Woche nach der Klausur noch keine Anwesenheit → Sammelmail über Klausuren der *eigenen* Stufen,
+einmalig je Klausur und Person. Manuell: `POST /api/stufenleitung/email-ausloesen/{klausur_id}`.
 
-[Alle waren anwesend]  ← Button → GET /anwesenheit/alle-da?token=XXX
-[Jemand hat gefehlt]   ← Button → GET /anwesenheit/eingabe?token=XXX
-```
+**Moodle** (`Auth/MoodleApi`): `core_user_get_users` für `auth=ldap` und `manual` (`{MOODLE_URL}/webservice/rest/server.php`).
+Lehrkraft = Custom-Field `klasse == "Lehrkraft"`; Kürzel aus dem Nachnamen (`Gebauer (SZ)` → `SZ`); E-Mail nur für
+Lehrkräfte; Stufe aus `klasse`. Nicht mehr vorhandene, unreferenzierte, nicht-externe Konten werden gelöscht.
 
-**Token-basierte Seite** (`/anwesenheit/eingabe?token=XXX`):
-- Token in `email_benachrichtigungen.token` nachschlagen
-- Zeigt Liste aller Prüflinge mit Checkboxen (fehlend ja/nein + Kommentarfeld)
-- Kein Login erforderlich (Token = Authentifizierung)
-- Formular sendet an `POST /anwesenheit/token-eintrag`
-- Nachträgliche Korrekturen: Lehrkraft, Stufenleitung, Admin über normale UI
+## API (`public/api.php`)
 
-**PHPMailer-Konfiguration** (aus `.env`):
-```
-SMTP_HOST=mail.schule.de
-SMTP_PORT=587
-SMTP_USER=klausurplan@schule.de
-SMTP_PASS=xxxx
-SMTP_FROM_NAME=Klausurplan
-```
+`GET /api/me` · Admin: `/admin/benutzer[/{id}/rollen]`, `/admin/moodle-sync`, `/admin/faecher[/{k}]`, `/admin/stufen`,
+`/admin/benutzer/{id}/stufenleitungen` · Stufenleitung: `/stufenleitung/gomst-import`, `…/zuordnungen` (GET/POST),
+`…/moodle-schueler`, `…/externe-lehrkraefte[/{id}]`, `…/meine-stufen[/{id}]`, `…/lehrkraefte`, `…/halbjahre[/{id}/kurse]`,
+`…/halbjahr-vorschlag`, `…/kurse/{id}[/schueler|/zusatz-schueler[/{ks}]]`, `…/entschuldigung/{id}`,
+`…/email-ausloesen/{klausur}`, `…/daten/{halbjahr}` (löschen) · Klausuren: `/klausuren[/{id}]`, `/klausuren/vorlage`,
+`/klausuren/paste-import`, `/klausuren/meine-nachschreibtermine`, `/kurse` · `/nachschreibtermine[/{id}[/klausuren]]` ·
+`/anwesenheit/{klausur}`, `/nachschreib-anwesenheit/{id}` · Schüler: `/schueler/meine-klausuren`, `…/meine-nachschreibtermine`.
+Feste Routen stehen **vor** Routen mit `{id}`. Die Rollen je Route stehen am Ende der Registrierung in `api.php`.
 
----
+## Frontend (`public/assets/app.js`)
 
-## API-Endpunkte (public/api.php)
-
-Alle Endpunkte prüfen Session/Rolle, geben JSON zurück.
-
-```
-# Authentifizierung / Session
-GET  /api/me                          → eigene Nutzerinfos + Rollen
-
-# Admin
-GET  /api/admin/benutzer              → alle Benutzer mit Rollen
-POST /api/admin/benutzer/{id}/rollen  → Rollen setzen
-POST /api/admin/moodle-sync           → Moodle API abfragen, Nutzer aktualisieren
-GET  /api/admin/faecher               → Fächerliste
-PUT  /api/admin/faecher/{kuerzel}     → Fach bearbeiten
-
-# Stufenleitung
-POST /api/stufenleitung/gomst-import         → GoMST-Datei hochladen
-GET  /api/stufenleitung/zuordnungen          → nicht zugeordnete Namen
-POST /api/stufenleitung/zuordnungen          → Zuordnung speichern/ändern/aufheben (dauerhaft)
-GET  /api/stufenleitung/moodle-schueler      → alle Moodle-Konten (zum Korrigieren)
-POST/PUT/DELETE /api/stufenleitung/externe-lehrkraefte[/{id}]  → externe Lehrkräfte
-GET  /api/stufenleitung/meine-stufen         → alle Stufen mit Flag „meine“
-PUT/DELETE /api/stufenleitung/meine-stufen/{stufe_id}  → Zuständigkeit übernehmen/abgeben
-GET  /api/stufenleitung/anwesenheiten/{halbjahr_id}  → Übersicht
-POST /api/stufenleitung/entschuldigung/{anwesenheit_id}
-POST /api/stufenleitung/email-ausloesen/{klausur_id}  → manuelle Mail
-DELETE /api/stufenleitung/daten/{halbjahr_id}         → Daten löschen
-
-# Nachschreibtermine
-GET  /api/nachschreibtermine
-POST /api/nachschreibtermine
-PUT  /api/nachschreibtermine/{id}
-POST /api/nachschreibtermine/{id}/klausuren  → Klausuren verknüpfen
-
-# Klausuren
-GET  /api/klausuren                   → Lehrkraft: eigene; SL: eigene Stufen (?alle=1 = alle); Admin: alle
-GET  /api/klausuren/vorlage?halbjahr_id=X  → CSV-Vorlage für ein Halbjahr (Stufe)
-POST /api/klausuren                   → Klausur anlegen
-PUT  /api/klausuren/{id}
-POST /api/klausuren/paste-import?halbjahr_id=X  → Excel-Paste-Daten (Kurse nur in diesem Halbjahr)
-
-# Anwesenheit
-GET  /api/anwesenheit/{klausur_id}
-POST /api/anwesenheit/{klausur_id}    → Anwesenheiten eintragen/aktualisieren
-
-# Token-basiert (kein Login nötig)
-GET  /anwesenheit/alle-da?token=XXX
-GET  /anwesenheit/eingabe?token=XXX
-POST /anwesenheit/token-eintrag
-
-# Schüler
-GET  /api/schueler/meine-klausuren
-```
-
----
+Eine Datei, Hash-Routing (`VIEWS`), `apiFetch('/pfad')` (JSON, wirft `Error` mit der Servermeldung), Dialoge als
+`.dialog-overlay` (`schliessbar()`), Rollen über `hatRolle()`. **Immer `escHtml()`** für Daten in `innerHTML`.
+Zuordnungs-Ansicht lädt nach jeder Änderung neu (`ladeZuordnungen`) und behält Tab/Filter (`zuordnungenZustand`).
+CSS in `app.css` (funktional, eigenes Design, keine Frameworks).
 
 ## Sicherheit & Datenschutz
 
-- **Alle DB-Zugriffe:** PDO Prepared Statements, niemals String-Konkatenation
-- **CSRF-Schutz:** Für alle POST-Requests (Token im HTML/Header)
-- **Session:** PHP-Sessions, `session_regenerate_id()` nach Login
-- **Token-Links:** `random_bytes(32)` → hex, in DB gespeichert, kein Ablaufdatum
-- **Schüler sehen keine anderen Schüler:** API gibt bei Schüler-Rolle nur eigene Daten zurück
-- **Keine externen Requests** aus dem Browser (kein CDN)
-- **Logs:** Kein Zugriffs-Log, aber PHP-Error-Log aktiv halten
-- **Datenlöschung:** Stufenleitung/Admin können Halbjahre inkl. aller Klausuren löschen
-  (CASCADE in DB kümmert sich um abhängige Tabellen)
-- `.env` niemals im Webroot, nicht committen
-
----
-
-## .env.example
-
-```ini
-# Datenbank
-DB_HOST=localhost
-DB_NAME=klausurplan
-DB_USER=klausurplan_user
-DB_PASS=
-
-# LTI 1.3 – Plattformdaten stehen in der DB (Setup-Assistent /setup.php)
-LTI_PRIVATE_KEY_FILE=private.key
-LTI_KID=klausurplan-key-1
-
-# Moodle REST API
-MOODLE_URL=https://moodle.schule.de
-MOODLE_API_TOKEN=
-
-# SMTP
-SMTP_HOST=mail.schule.de
-SMTP_PORT=587
-SMTP_USER=klausurplan@schule.de
-SMTP_PASS=
-SMTP_FROM_NAME=Klausurplan
-
-# App
-APP_URL=https://schule.de/klausurplan
-APP_ENV=production
-```
-
----
-
-## Implementierungsreihenfolge
-
-Claude Code soll die Phasen **der Reihe nach** abarbeiten. Nach jeder Phase
-gibt es funktionierende, testbare Software.
-
-### Phase 1 – Fundament
-- [ ] `composer.json` mit Dependencies (`celtic-project/LTI-PHP`, `phpmailer/phpmailer`, `vlucas/phpdotenv`)
-- [ ] Migrationen (`migrations/001_schema.sql`, `migrations/002_faecher_lookup.sql`)
-- [ ] `Database.php` (PDO-Singleton)
-- [ ] `Session.php` (Rollen, Zugriffsschutz)
-- [ ] LTI-Launch (`lti-launch.php`, `LtiHandler.php`) inkl. Bootstrapping Admin
-- [ ] Basis-Router (`public/api.php`, `Api/Router.php`)
-- [ ] `/api/me` Endpunkt
-
-### Phase 2 – Nutzerverwaltung
-- [ ] `MoodleApi.php` (Nutzer-Sync)
-- [ ] `AdminApi.php` – Benutzer + Rollen verwalten
-- [ ] Kürzel-Extraktion beim LTI-Login
-- [ ] Fächer-API (lesen + bearbeiten)
-
-### Phase 3 – GoMST-Import & Zuordnung
-- [ ] `GomstImporter.php` inkl. Update-Logik
-- [ ] Anzeigename-Generierung
-- [ ] Automatisches Namensmatching
-- [ ] `StufenleitungApi.php` → Import + manuelle Zuordnung
-- [ ] Frontend: Zuordnungs-UI
-
-### Phase 4 – Klausurtermine
-- [ ] `KlausurPasteParser.php` (Excel-Paste clientseitig in JS + Servervalidierung)
-- [ ] `LehrkraftApi.php` – Klausuren CRUD
-- [ ] Nachschreibtermine CRUD + Verknüpfung
-- [ ] Frontend: Klausurübersicht, Paste-Textarea, Direktanlage-Formular
-
-### Phase 5 – Anwesenheit
-- [ ] Anwesenheit-API (eintragen, korrigieren, entschuldigen)
-- [ ] Token-basierte Seiten (alle-da, Eingabe)
-- [ ] Frontend: Anwesenheitsliste für Lehrkraft
-
-### Phase 6 – E-Mail & Cronjob
-- [ ] `Mailer.php`, `EmailTemplates.php`
-- [ ] `erinnerungen_senden.php` (CLI)
-- [ ] Manuelle Auslösung via API
-
-### Phase 7 – Schüleransicht & Finish
-- [ ] `SchuelerApi.php` – eigene Klausuren
-- [ ] Frontend: alle Rollen-Views
-- [ ] Admin-UI: Fächer-Lookup pflegen, Daten löschen
-- [ ] CSS: funktionales, sauberes Layout
-
----
-
-## Hinweise für Claude Code
-
-- Immer PHP 8.5 Features nutzen (readonly, match, Fibers wenn sinnvoll)
-- Typisierung konsequent: Rückgabetypen, Parameter-Typen, `strict_types=1`
-- Fehlerbehandlung: Exception-basiert, JSON-Fehlerantworten mit HTTP-Statuscodes
-- Keine globalen Variablen außer dem DB-Singleton
-- Kommentare auf Deutsch wo sinnvoll
-- Vor jeder Phase: kurz zusammenfassen, was implementiert wird
-- Nach jeder Phase: Testanweisungen ausgeben (curl-Befehle oder Browser-Schritte)
-- **Frontend-Sprache:** Im UI gendergerechte Sprache verwenden, z.B. „Schüler*innen", „Teilnehmende", „Lehrkraft", „Administrator*in". Im PHP-Code und bei DB-Bezeichnern ist das nicht erforderlich.
+- Prepared Statements; Ausgaben escapen (HTML-Token-Seiten mit `htmlspecialchars`, JSON im Frontend mit `escHtml`).
+- Session: PHP-Sessions (`klausurplan_session`, httponly, SameSite=Lax), `session_regenerate_id()` nach Login.
+- Schüler*innen sehen nur eigene Daten (`SchuelerApi` fragt ausschließlich mit der eigenen ID ab).
+- CSP über `.htaccess`/`api.php`/`index.php` (nur `'self'`, Frame-Ancestors Moodle). Kein Zugriffs-Log, aber PHP-Error-Log aktiv.
+- Halbjahre samt Klausuren löschbar (CASCADE). `.env`, `*.key`, `vendor/` nie committen (`.gitignore`).
+- Bekannt/offen: kein CSRF-Token (SameSite=Lax + JSON-Content-Type); transitive Composer-Abhängigkeiten
+  (guzzle, commonmark) haben Advisories (`composer audit`) – bei Gelegenheit `composer update` prüfen.
