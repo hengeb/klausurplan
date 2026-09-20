@@ -119,6 +119,7 @@ async function viewStart(el) {
             <h2>Willkommen, ${me.vorname} ${me.nachname}</h2>
             <p>Rollen: <strong>${me.rollen.length ? me.rollen.join(', ') : '–'}</strong></p>
         </div>
+        ${hatRolle('stufenleitung') ? '<div class="karte" id="meine-stufen-karte"></div>' : ''}
         <div class="kacheln">
             ${hatRolle('schueler') && !hatRolle('admin', 'stufenleitung', 'lehrkraft') ? `
             <a href="#schueler" class="kachel">
@@ -154,6 +155,121 @@ async function viewStart(el) {
             </a>` : ''}
         </div>
     `;
+
+    const stufenKarte = el.querySelector('#meine-stufen-karte');
+    if (stufenKarte) {
+        renderMeineStufenKarte(stufenKarte, me.stufen ?? [], () => viewStart(el));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Meine Stufen (Self-Service der Stufenleitung)
+// ---------------------------------------------------------------------------
+
+function sortiereStufen(stufen) {
+    return [...stufen].sort((a, b) =>
+        b.schuljahr.localeCompare(a.schuljahr) || a.name.localeCompare(b.name, 'de'));
+}
+
+function renderMeineStufenKarte(karte, stufen, nachAenderung) {
+    const chips = sortiereStufen(stufen).map(s =>
+        `<span class="stufe-chip">${escHtml(s.name)} <small>${escHtml(s.schuljahr)}</small></span>`
+    ).join(' ');
+
+    karte.innerHTML = `
+        <h3 class="karte-titel">Meine Stufen (Stufenleitung)</h3>
+        ${stufen.length
+            ? `<p>${chips}</p>`
+            : '<p class="hinweis">Sie sind derzeit für keine Stufe zuständig.</p>'}
+        <p class="hinweis">
+            Die Zuständigkeit bestimmt, welche Klausuren standardmäßig in Ihrer Liste erscheinen
+            und für welche Stufen Sie Übersichts-E-Mails zur Anwesenheit erhalten.
+            Sie verwalten sie selbst.
+        </p>
+        <button class="btn btn-sekundaer" type="button">Stufen verwalten</button>`;
+    karte.querySelector('button').addEventListener('click', () => zeigeMeineStufenDialog(nachAenderung));
+}
+
+/** Dialog zum Übernehmen/Abgeben der Zuständigkeit für Stufen. Änderungen wirken sofort. */
+async function zeigeMeineStufenDialog(nachAenderung) {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+        <div class="dialog" style="max-width:520px">
+            <h3>Meine Stufen</h3>
+            <p class="hinweis">
+                Setzen Sie einen Haken, um für eine Stufe zuständig zu sein. Änderungen gelten sofort.
+            </p>
+            <div id="ms-liste"><p class="lade-text">Wird geladen…</p></div>
+            <p id="ms-fehler" class="fehler" style="display:none"></p>
+            <div class="dialog-aktionen">
+                <button class="btn" type="button" id="ms-fertig">Fertig</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    let geaendert = false;
+    const onEsc = e => { if (e.key === 'Escape') schliessen(); };
+    function schliessen() {
+        document.removeEventListener('keydown', onEsc);
+        if (!overlay.isConnected) return;
+        overlay.remove();
+        if (geaendert) nachAenderung?.();
+    }
+    document.addEventListener('keydown', onEsc);
+    overlay.addEventListener('click', e => { if (e.target === overlay) schliessen(); });
+    overlay.querySelector('#ms-fertig').addEventListener('click', schliessen);
+
+    const listeEl  = overlay.querySelector('#ms-liste');
+    const fehlerEl = overlay.querySelector('#ms-fehler');
+
+    let stufen;
+    try {
+        stufen = await apiFetch('/stufenleitung/meine-stufen');
+    } catch (err) {
+        listeEl.innerHTML = '';
+        fehlerEl.textContent = err.message;
+        fehlerEl.style.display = '';
+        return;
+    }
+
+    if (stufen.length === 0) {
+        listeEl.innerHTML = '<p class="hinweis">Es gibt noch keine Stufen. Importieren Sie zuerst eine GoMST-Datei.</p>';
+        return;
+    }
+
+    const nachJahr = {};
+    for (const st of stufen) (nachJahr[st.schuljahr] ??= []).push(st);
+
+    listeEl.innerHTML = Object.keys(nachJahr).sort().reverse().map(jahr => `
+        <div class="ms-jahr">
+            <div class="ms-jahr-titel">Schuljahr ${escHtml(jahr)}</div>
+            ${nachJahr[jahr].map(st => `
+                <label class="ms-stufe">
+                    <input type="checkbox" data-stufe-id="${st.id}" ${st.ist_meine == 1 ? 'checked' : ''}>
+                    ${escHtml(st.name)}
+                </label>`).join('')}
+        </div>`).join('');
+
+    listeEl.addEventListener('change', async e => {
+        const cb = e.target.closest('input[type="checkbox"]');
+        if (!cb) return;
+        const soll = cb.checked;
+        cb.disabled = true;
+        fehlerEl.style.display = 'none';
+        try {
+            await apiFetch(`/stufenleitung/meine-stufen/${cb.dataset.stufeId}`, {
+                method: soll ? 'PUT' : 'DELETE',
+            });
+            geaendert = true;
+        } catch (err) {
+            cb.checked = !soll;
+            fehlerEl.textContent = err.message;
+            fehlerEl.style.display = '';
+        } finally {
+            cb.disabled = false;
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +328,24 @@ async function viewImport(el) {
                 body: formData,
             });
 
+            const neueStufen = res.stufenleitung_neu ?? [];
+            const stufenleitungHtml = neueStufen.length ? `
+                <div class="hinweis-box hinweis-info" style="margin-top:1rem">
+                    <strong>Sie sind jetzt Stufenleitung für:</strong>
+                    <ul class="sl-neu-liste">
+                        ${neueStufen.map(st => `
+                        <li>
+                            <span>${escHtml(st.name)} <small>(${escHtml(st.schuljahr)})</small></span>
+                            <button type="button" class="btn btn-klein btn-sekundaer btn-sl-abgeben"
+                                    data-stufe-id="${st.id}">Zuständigkeit abgeben</button>
+                        </li>`).join('')}
+                    </ul>
+                    <p class="hinweis" style="margin:0">
+                        Das geschieht automatisch beim Import. Die Zuständigkeit können Sie
+                        jederzeit unter „Meine Stufen“ auf der Übersichtsseite ändern.
+                    </p>
+                </div>` : '';
+
             ergebnisEl.innerHTML = `
                 <div class="ergebnis-box ergebnis-ok">
                     <strong>Import erfolgreich</strong>
@@ -223,7 +357,24 @@ async function viewImport(el) {
                     </ul>
                     <a href="#zuordnungen" class="btn btn-sekundaer">Zu den Zuordnungen →</a>
                 </div>
+                ${stufenleitungHtml}
             `;
+
+            ergebnisEl.querySelectorAll('.btn-sl-abgeben').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    btn.disabled = true;
+                    try {
+                        await apiFetch(`/stufenleitung/meine-stufen/${btn.dataset.stufeId}`, { method: 'DELETE' });
+                        btn.replaceWith(Object.assign(document.createElement('span'), {
+                            className: 'ok-text',
+                            textContent: '✓ Zuständigkeit abgegeben',
+                        }));
+                    } catch (err) {
+                        alert('Fehler: ' + err.message);
+                        btn.disabled = false;
+                    }
+                });
+            });
         } catch (err) {
             ergebnisEl.innerHTML = `<p class="fehler">${err.message}</p>`;
         } finally {
@@ -237,6 +388,10 @@ async function viewImport(el) {
 // View: Zuordnungen
 // ---------------------------------------------------------------------------
 
+// Zustand, der ein Neuladen der Ansicht überdauert (aktiver Tab, Suchfelder)
+const zuordnungenZustand = { tab: 'schueler', filter: { schueler: '', lehrkraefte: '' } };
+let moodleSchuelerAlle = null; // Cache für das Korrigieren einer Zuordnung
+
 async function viewZuordnungen(el) {
     if (!hatRolle('admin', 'stufenleitung')) {
         el.innerHTML = '<p class="fehler">Kein Zugriff.</p>';
@@ -244,8 +399,16 @@ async function viewZuordnungen(el) {
     }
 
     el.innerHTML = '<p class="lade-text">Zuordnungen werden geladen…</p>';
+    moodleSchuelerAlle = null;
+    await ladeZuordnungen(el);
+}
+
+/** Lädt die Daten neu und zeichnet die Ansicht an derselben Scroll-Position neu. */
+async function ladeZuordnungen(el) {
+    const y = window.scrollY;
     const daten = await apiFetch('/stufenleitung/zuordnungen');
     renderZuordnungenView(el, daten);
+    window.scrollTo(0, y);
 }
 
 /**
@@ -270,45 +433,72 @@ function matchesStufe(moodleStufe, gomstStufen) {
     return false;
 }
 
+/** Moodle speichert das Kürzel im Nachnamen: „Gebauer (GB)“ → „Gebauer“. */
+function nachnameOhneKuerzel(nachname, kuerzel) {
+    return kuerzel ? nachname.replace(/\s*\([^)]+\)$/, '') : nachname;
+}
+
+function lehrkraftAnzeige(l, mitVergeben = false) {
+    const nachname = nachnameOhneKuerzel(l.nachname, l.kuerzel);
+    const kuerzel  = l.kuerzel ? ` (${l.kuerzel})` : '';
+    const extern   = l.extern == 1 ? ' – extern' : '';
+    const vergeben = mitVergeben && l.vergeben == 1 ? ' – bereits zugeordnet' : '';
+    return `${nachname}, ${l.vorname}${kuerzel}${extern}${vergeben}`;
+}
+
 function renderZuordnungenView(el, daten) {
     const {
-        schueler_gomst: sGomst,
-        schueler_moodle: sMoodle,
-        lehrkraefte_kurse: lKurseRaw,
-        lehrkraefte_moodle: lMoodle,
+        schueler_gomst:         sGomst,
+        schueler_moodle:        sMoodle,
+        schueler_zugeordnet:    sZugeordnet,
+        lehrkraefte_kurse:      lKurseRaw,
+        lehrkraefte_moodle:     lMoodle,
+        lehrkraefte_zugeordnet: lZugeordnet,
+        externe_lehrkraefte:    externe,
     } = daten;
 
     // Kürzels, die mit einer Ziffer enden, sind keine echten Lehrkraft-Kürzels
     const lKurse = lKurseRaw.filter(k => !/\d$/.test(k.lehrer_kuerzel));
+    const lFrei  = lMoodle.filter(l => l.vergeben != 1);
 
     const anzUnzugeordnetS = sGomst.length;
-    const anzUnzugeordnetL = lKurse.filter(k => !lMoodle.some(l => l.kuerzel === k.lehrer_kuerzel)).length;
+    const anzUnzugeordnetL = lKurse.filter(k => !lFrei.some(l => l.kuerzel === k.lehrer_kuerzel)).length;
+
+    const aktiv = zuordnungenZustand.tab;
 
     el.innerHTML = `
         <h2>Zuordnungen</h2>
+        <p class="hinweis">
+            Zuordnungen werden dauerhaft gespeichert – auch wenn Kurse oder Halbjahre gelöscht
+            und später erneut importiert werden.
+        </p>
 
         <div class="tabs">
-            <button class="tab aktiv" data-tab="schueler">
+            <button class="tab ${aktiv === 'schueler' ? 'aktiv' : ''}" data-tab="schueler">
                 Schüler*innen
                 ${anzUnzugeordnetS > 0 ? `<span class="badge">${anzUnzugeordnetS}</span>` : ''}
             </button>
-            <button class="tab" data-tab="lehrkraefte">
+            <button class="tab ${aktiv === 'lehrkraefte' ? 'aktiv' : ''}" data-tab="lehrkraefte">
                 Lehrkräfte
                 ${anzUnzugeordnetL > 0 ? `<span class="badge">${anzUnzugeordnetL}</span>` : ''}
             </button>
         </div>
 
-        <div id="tab-schueler" class="tab-inhalt">
+        <div id="tab-schueler" class="tab-inhalt ${aktiv === 'schueler' ? '' : 'versteckt'}">
             ${renderSchuelerZuordnung(sGomst, sMoodle)}
+            ${renderSchuelerZugeordnet(sZugeordnet)}
         </div>
-        <div id="tab-lehrkraefte" class="tab-inhalt versteckt">
-            ${renderLehrkraefte(lKurse, lMoodle)}
+        <div id="tab-lehrkraefte" class="tab-inhalt ${aktiv === 'lehrkraefte' ? '' : 'versteckt'}">
+            ${renderLehrkraefte(lKurse, lFrei)}
+            ${renderLehrkraefteZugeordnet(lZugeordnet)}
+            ${renderExterneLehrkraefte(externe)}
         </div>
     `;
 
     // Tab-Wechsel
     el.querySelectorAll('.tab').forEach(btn => {
         btn.addEventListener('click', () => {
+            zuordnungenZustand.tab = btn.dataset.tab;
             el.querySelectorAll('.tab').forEach(b => b.classList.remove('aktiv'));
             el.querySelectorAll('.tab-inhalt').forEach(t => t.classList.add('versteckt'));
             btn.classList.add('aktiv');
@@ -316,58 +506,190 @@ function renderZuordnungenView(el, daten) {
         });
     });
 
-    // Zuordnungs-Buttons für Schüler*innen
-    el.querySelectorAll('.btn-zuordnen-s').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const nameRoh = btn.dataset.nameRoh;
-            const select  = el.querySelector(`select[data-name-roh="${CSS.escape(nameRoh)}"]`);
-            const benutzerId = select?.value ? parseInt(select.value) : null;
+    const neuLaden = () => ladeZuordnungen(el);
 
-            if (!benutzerId) return;
-
-            btn.disabled = true;
-            try {
-                await apiFetch('/stufenleitung/zuordnungen', {
-                    method: 'POST',
-                    body: JSON.stringify({ typ: 'schueler', name_roh: nameRoh, benutzer_id: benutzerId }),
-                });
-                const zeile = btn.closest('tr');
-                zeile.classList.add('zugeordnet');
-                zeile.querySelector('.zuordnung-status').textContent = '✓ Zugeordnet';
-                select.disabled = true;
-                btn.remove();
-            } catch (err) {
-                alert('Fehler: ' + err.message);
-                btn.disabled = false;
-            }
-        });
+    // Suchfelder der „Bereits zugeordnet“-Listen
+    el.querySelectorAll('.filter-zugeordnet').forEach(input => {
+        const liste = input.dataset.liste;
+        const anwenden = () => {
+            const q = input.value.trim().toLowerCase();
+            zuordnungenZustand.filter[liste] = input.value;
+            input.closest('.zugeordnet-block').querySelectorAll('tbody tr').forEach(tr => {
+                tr.classList.toggle('versteckt', q !== '' && !(tr.dataset.suche ?? '').includes(q));
+            });
+        };
+        input.value = zuordnungenZustand.filter[liste] ?? '';
+        input.addEventListener('input', anwenden);
+        anwenden();
     });
 
-    // Zuordnungs-Buttons für Lehrkräfte
-    el.querySelectorAll('.btn-zuordnen-l').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const kuerzel    = btn.dataset.kuerzel;
-            const select     = el.querySelector(`select[data-kuerzel="${CSS.escape(kuerzel)}"]`);
+    // --- Schüler*innen: neu zuordnen -------------------------------------------------
+    const tabS = el.querySelector('#tab-schueler');
+    tabS.addEventListener('click', async ev => {
+        const btn = ev.target.closest('button');
+        if (!btn) return;
+
+        if (btn.classList.contains('btn-zuordnen-s')) {
+            const nameRoh    = btn.dataset.nameRoh;
+            const select     = btn.closest('tr').querySelector('select');
             const benutzerId = select?.value ? parseInt(select.value) : null;
-
             if (!benutzerId) return;
+            await speichereZuordnung(btn, { typ: 'schueler', name_roh: nameRoh, benutzer_id: benutzerId }, neuLaden);
+        } else if (btn.classList.contains('btn-korrigieren-s')) {
+            await starteKorrekturSchueler(btn.closest('tr'), neuLaden);
+        } else if (btn.classList.contains('btn-aufheben-s')) {
+            const zeile = btn.closest('tr');
+            const name  = zeile.querySelector('td').textContent;
+            if (!confirm(`Zuordnung für „${name}" wirklich aufheben?\n\nDie Person wird danach auch bei künftigen Importen nicht mehr automatisch zugeordnet.`)) return;
+            await speichereZuordnung(btn, { typ: 'schueler', name_roh: zeile.dataset.nameRoh, benutzer_id: null }, neuLaden);
+        }
+    });
 
+    // --- Lehrkräfte ---------------------------------------------------------------
+    const tabL = el.querySelector('#tab-lehrkraefte');
+    tabL.addEventListener('click', async ev => {
+        const btn = ev.target.closest('button');
+        if (!btn) return;
+
+        if (btn.classList.contains('btn-zuordnen-l')) {
+            const kuerzel    = btn.dataset.kuerzel;
+            const select     = btn.closest('tr').querySelector('select');
+            const benutzerId = select?.value ? parseInt(select.value) : null;
+            if (!benutzerId) return;
+            await speichereZuordnung(btn, { typ: 'lehrkraft', lehrer_kuerzel: kuerzel, benutzer_id: benutzerId }, neuLaden);
+        } else if (btn.classList.contains('btn-korrigieren-l')) {
+            starteKorrekturLehrkraft(btn.closest('tr'), lMoodle, neuLaden);
+        } else if (btn.classList.contains('btn-aufheben-l')) {
+            const zeile = btn.closest('tr');
+            if (!confirm(`Zuordnung für Kürzel „${zeile.dataset.kuerzel}" wirklich aufheben?\n\nDie Kurse haben danach keine Lehrkraft mehr, und das Kürzel wird bei künftigen Importen nicht mehr automatisch zugeordnet.`)) return;
+            await speichereZuordnung(btn, { typ: 'lehrkraft', lehrer_kuerzel: zeile.dataset.kuerzel, benutzer_id: null }, neuLaden);
+        } else if (btn.classList.contains('btn-extern-anlegen')) {
+            zeigeExterneLehrkraftDialog(null, btn.dataset.kuerzel, neuLaden);
+        } else if (btn.id === 'btn-extern-neu') {
+            zeigeExterneLehrkraftDialog(null, '', neuLaden);
+        } else if (btn.classList.contains('btn-extern-bearbeiten')) {
+            zeigeExterneLehrkraftDialog(externe.find(x => x.id == btn.dataset.id), '', neuLaden);
+        } else if (btn.classList.contains('btn-extern-loeschen')) {
+            const ext = externe.find(x => x.id == btn.dataset.id);
+            const kurse = parseInt(ext?.anzahl_kurse) || 0;
+            if (!confirm(`Externe Lehrkraft „${ext.vorname} ${ext.nachname}" wirklich löschen?` +
+                (kurse > 0 ? `\n\n${kurse} Kurs(e) haben danach keine Lehrkraft mehr.` : ''))) return;
             btn.disabled = true;
             try {
-                await apiFetch('/stufenleitung/zuordnungen', {
-                    method: 'POST',
-                    body: JSON.stringify({ typ: 'lehrkraft', lehrer_kuerzel: kuerzel, benutzer_id: benutzerId }),
-                });
-                const zeile = btn.closest('tr');
-                zeile.classList.add('zugeordnet');
-                zeile.querySelector('.zuordnung-status').textContent = '✓ Zugeordnet';
-                select.disabled = true;
-                btn.remove();
+                await apiFetch(`/stufenleitung/externe-lehrkraefte/${ext.id}`, { method: 'DELETE' });
+                await neuLaden();
             } catch (err) {
                 alert('Fehler: ' + err.message);
                 btn.disabled = false;
             }
-        });
+        }
+    });
+}
+
+/** Speichert eine Zuordnung und lädt die Ansicht neu. */
+async function speichereZuordnung(btn, body, nachSpeichern) {
+    btn.disabled = true;
+    try {
+        await apiFetch('/stufenleitung/zuordnungen', { method: 'POST', body: JSON.stringify(body) });
+        await nachSpeichern();
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+        btn.disabled = false;
+    }
+}
+
+/** Ersetzt in einer „zugeordnet“-Zeile das Konto durch ein Auswahlfeld (Korrektur). */
+async function starteKorrekturSchueler(zeile, neuLaden) {
+    const zelleKonto  = zeile.querySelector('.zelle-konto');
+    const zelleAktion = zeile.querySelector('.zelle-aktion');
+    const aktuelleId  = parseInt(zelleKonto.dataset.benutzerId);
+
+    // Ursprungszustand merken (für „Abbrechen“), bevor die Buttons deaktiviert werden
+    const alteKonto  = zelleKonto.innerHTML;
+    const alteAktion = zelleAktion.innerHTML;
+    zelleAktion.querySelectorAll('button').forEach(b => { b.disabled = true; });
+
+    try {
+        moodleSchuelerAlle ??= await apiFetch('/stufenleitung/moodle-schueler');
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+        zelleAktion.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        return;
+    }
+
+    const stufen = zeile.dataset.stufen;
+    const optionen = alleStufen => moodleSchuelerAlle
+        .filter(m => alleStufen || m.id === aktuelleId || matchesStufe(m.stufe, stufen))
+        .map(m => {
+            const stufe    = m.stufe ? ` (${m.stufe})` : '';
+            const vergeben = m.vergeben == 1 && m.id !== aktuelleId ? ' – bereits zugeordnet' : '';
+            return `<option value="${m.id}"${m.id === aktuelleId ? ' selected' : ''}>${escHtml(`${m.nachname}, ${m.vorname}${stufe}${vergeben}`)}</option>`;
+        }).join('');
+
+    zelleKonto.innerHTML = `
+        <select class="select-zuordnung">${optionen(false)}</select>
+        <label class="checkbox-klein"><input type="checkbox" class="cb-alle-stufen"> Alle Stufen anzeigen</label>`;
+    zelleAktion.innerHTML = `
+        <button class="btn btn-klein btn-korrektur-speichern" type="button">Speichern</button>
+        <button class="btn btn-klein btn-sekundaer btn-korrektur-abbrechen" type="button">Abbrechen</button>`;
+
+    const select = zelleKonto.querySelector('select');
+    zelleKonto.querySelector('.cb-alle-stufen').addEventListener('change', e => {
+        const gewaehlt = select.value;
+        select.innerHTML = optionen(e.target.checked);
+        select.value = gewaehlt;
+    });
+
+    zelleAktion.querySelector('.btn-korrektur-abbrechen').addEventListener('click', ev => {
+        ev.stopPropagation();
+        zelleKonto.innerHTML  = alteKonto;
+        zelleAktion.innerHTML = alteAktion;
+    });
+    zelleAktion.querySelector('.btn-korrektur-speichern').addEventListener('click', async ev => {
+        ev.stopPropagation();
+        const neueId = parseInt(select.value);
+        if (!neueId || neueId === aktuelleId) {
+            zelleAktion.querySelector('.btn-korrektur-abbrechen').click();
+            return;
+        }
+        await speichereZuordnung(ev.currentTarget,
+            { typ: 'schueler', name_roh: zeile.dataset.nameRoh, benutzer_id: neueId }, neuLaden);
+    });
+}
+
+/** Wie starteKorrekturSchueler, für Lehrkräfte (kleine Liste, alle direkt auswählbar). */
+function starteKorrekturLehrkraft(zeile, lehrkraefte, neuLaden) {
+    const zelleKonto  = zeile.querySelector('.zelle-konto');
+    const zelleAktion = zeile.querySelector('.zelle-aktion');
+    const aktuelleId  = parseInt(zelleKonto.dataset.benutzerId);
+
+    const optionen = lehrkraefte.map(l =>
+        `<option value="${l.id}"${l.id === aktuelleId ? ' selected' : ''}>${escHtml(lehrkraftAnzeige(l, l.id !== aktuelleId))}</option>`
+    ).join('');
+
+    const alteKonto  = zelleKonto.innerHTML;
+    const alteAktion = zelleAktion.innerHTML;
+
+    zelleKonto.innerHTML = `<select class="select-zuordnung">${optionen}</select>`;
+    zelleAktion.innerHTML = `
+        <button class="btn btn-klein btn-korrektur-speichern" type="button">Speichern</button>
+        <button class="btn btn-klein btn-sekundaer btn-korrektur-abbrechen" type="button">Abbrechen</button>`;
+
+    const select = zelleKonto.querySelector('select');
+    zelleAktion.querySelector('.btn-korrektur-abbrechen').addEventListener('click', ev => {
+        ev.stopPropagation();
+        zelleKonto.innerHTML  = alteKonto;
+        zelleAktion.innerHTML = alteAktion;
+    });
+    zelleAktion.querySelector('.btn-korrektur-speichern').addEventListener('click', async ev => {
+        ev.stopPropagation();
+        const neueId = parseInt(select.value);
+        if (!neueId || neueId === aktuelleId) {
+            zelleAktion.querySelector('.btn-korrektur-abbrechen').click();
+            return;
+        }
+        await speichereZuordnung(ev.currentTarget,
+            { typ: 'lehrkraft', lehrer_kuerzel: zeile.dataset.kuerzel, benutzer_id: neueId }, neuLaden);
     });
 }
 
@@ -383,7 +705,7 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
         // Nur Moodle-Konten mit passender Stufe anzeigen
         const passende = sMoodle.filter(m => matchesStufe(m.stufe, ks.stufen));
         const moodleOptionen = passende.map(m =>
-            `<option value="${m.id}">${m.nachname}, ${m.vorname}${m.stufe ? ` (${m.stufe})` : ''}</option>`
+            `<option value="${m.id}">${escHtml(m.nachname)}, ${escHtml(m.vorname)}${m.stufe ? ` (${escHtml(m.stufe)})` : ''}</option>`
         ).join('');
 
         return `
@@ -399,7 +721,6 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
             </td>
             <td>
                 <button class="btn btn-klein btn-zuordnen-s" data-name-roh="${nameRohAttr}">Zuordnen</button>
-                <span class="zuordnung-status"></span>
             </td>
         </tr>`;
     }).join('');
@@ -426,21 +747,62 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
     `;
 }
 
-function renderLehrkraefte(lKurse, lMoodle) {
+function renderSchuelerZugeordnet(liste) {
+    if (liste.length === 0) return '';
+
+    const zeilen = liste.map(z => {
+        const konto = `${z.nachname}, ${z.vorname}`;
+        const suche = `${z.name_roh.replace('|', ' ')} ${konto}`.toLowerCase();
+        return `
+        <tr data-name-roh="${escHtml(z.name_roh)}" data-stufen="${escHtml(z.stufen ?? '')}" data-suche="${escHtml(suche)}">
+            <td>${parseZeigeNameRoh(z.name_roh)}</td>
+            <td>${escHtml(z.stufen ?? '')}</td>
+            <td>${z.anzahl_kurse}</td>
+            <td class="zelle-konto" data-benutzer-id="${z.schueler_id}">
+                ${escHtml(konto)}${z.moodle_stufe ? ` <small>(${escHtml(z.moodle_stufe)})</small>` : ''}
+            </td>
+            <td>${z.manuell == 1 ? 'manuell' : 'automatisch'}</td>
+            <td class="zelle-aktion">
+                <button class="btn btn-klein btn-sekundaer btn-korrigieren-s" type="button">Ändern</button>
+                <button class="btn btn-klein btn-sekundaer btn-aufheben-s" type="button">Aufheben</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+        <div class="tabelle-wrapper zugeordnet-block" style="margin-top:2rem">
+            <h3>Bereits zugeordnet (${liste.length})</h3>
+            <p class="tabelle-hinweis">
+                Hier können Sie fehlerhafte Zuordnungen – auch automatisch erkannte – korrigieren.
+                „Aufheben“ verhindert außerdem, dass die Person bei künftigen Importen wieder automatisch zugeordnet wird.
+            </p>
+            <input type="search" class="filter-zugeordnet" data-liste="schueler"
+                   placeholder="Nach Name filtern…" aria-label="Zugeordnete Schüler*innen filtern">
+            <table class="zuordnungs-tabelle">
+                <thead>
+                    <tr>
+                        <th>GoMST-Name</th>
+                        <th>Stufe(n)</th>
+                        <th>Kurse</th>
+                        <th>Moodle-Konto</th>
+                        <th>Art</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>${zeilen}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderLehrkraefte(lKurse, lFrei) {
     if (lKurse.length === 0) {
         return '<div class="karte"><p class="ok-text">✓ Alle Lehrkräfte sind zugeordnet.</p></div>';
     }
 
-    const moodleOptionen = lMoodle.map(l => {
-        // Moodle speichert z.B. "Gebauer (GB)" als Nachname; Kürzel daher aus Nachname entfernen
-        const nachname = l.kuerzel
-            ? l.nachname.replace(/\s*\([^)]+\)$/, '')
-            : l.nachname;
-        const anzeige = l.kuerzel
-            ? `${nachname}, ${l.vorname} (${l.kuerzel})`
-            : `${nachname}, ${l.vorname}`;
-        return `<option value="${l.id}">${anzeige}</option>`;
-    }).join('');
+    const moodleOptionen = lFrei.map(l =>
+        `<option value="${l.id}">${escHtml(lehrkraftAnzeige(l))}</option>`
+    ).join('');
 
     const zeilen = lKurse.map(k => {
         const kuerzelAttr = escHtml(k.lehrer_kuerzel);
@@ -456,7 +818,8 @@ function renderLehrkraefte(lKurse, lMoodle) {
             </td>
             <td>
                 <button class="btn btn-klein btn-zuordnen-l" data-kuerzel="${kuerzelAttr}">Zuordnen</button>
-                <span class="zuordnung-status"></span>
+                <button class="btn btn-klein btn-sekundaer btn-extern-anlegen" data-kuerzel="${kuerzelAttr}"
+                        title="Für Lehrkräfte ohne Moodle-Konto">Extern anlegen…</button>
             </td>
         </tr>`;
     }).join('');
@@ -464,15 +827,16 @@ function renderLehrkraefte(lKurse, lMoodle) {
     return `
         <div class="tabelle-wrapper">
             <p class="tabelle-hinweis">
-                ${lKurse.length} Kürzel ohne Moodle-Konto-Zuordnung.
+                ${lKurse.length} Kürzel ohne Lehrkraft-Zuordnung.
                 Die Zuordnung gilt für alle Kurse mit dem jeweiligen Kürzel.
+                Lehrkräfte ohne Moodle-Konto legen Sie mit „Extern anlegen…“ an.
             </p>
             <table class="zuordnungs-tabelle">
                 <thead>
                     <tr>
                         <th>Kürzel</th>
                         <th>Kurse</th>
-                        <th>Moodle-Konto</th>
+                        <th>Lehrkraft</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -480,6 +844,146 @@ function renderLehrkraefte(lKurse, lMoodle) {
             </table>
         </div>
     `;
+}
+
+function renderLehrkraefteZugeordnet(liste) {
+    if (liste.length === 0) return '';
+
+    const zeilen = liste.map(z => {
+        const anzeige = lehrkraftAnzeige(z);
+        return `
+        <tr data-kuerzel="${escHtml(z.lehrer_kuerzel)}" data-suche="${escHtml(`${z.lehrer_kuerzel} ${anzeige}`.toLowerCase())}">
+            <td>${escHtml(z.lehrer_kuerzel)}</td>
+            <td>${z.anzahl_kurse}</td>
+            <td class="zelle-konto" data-benutzer-id="${z.lehrer_id}">${escHtml(anzeige)}</td>
+            <td>${z.manuell == 1 ? 'manuell' : 'automatisch'}</td>
+            <td class="zelle-aktion">
+                <button class="btn btn-klein btn-sekundaer btn-korrigieren-l" type="button">Ändern</button>
+                <button class="btn btn-klein btn-sekundaer btn-aufheben-l" type="button">Aufheben</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+        <div class="tabelle-wrapper zugeordnet-block" style="margin-top:2rem">
+            <h3>Bereits zugeordnet (${liste.length})</h3>
+            <input type="search" class="filter-zugeordnet" data-liste="lehrkraefte"
+                   placeholder="Nach Kürzel oder Name filtern…" aria-label="Zugeordnete Lehrkräfte filtern">
+            <table class="zuordnungs-tabelle">
+                <thead>
+                    <tr>
+                        <th>Kürzel</th>
+                        <th>Kurse</th>
+                        <th>Lehrkraft</th>
+                        <th>Art</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>${zeilen}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderExterneLehrkraefte(externe) {
+    const zeilen = externe.map(x => `
+        <tr>
+            <td>${escHtml(x.nachname)}, ${escHtml(x.vorname)}</td>
+            <td>${escHtml(x.kuerzel ?? '')}</td>
+            <td>${escHtml(x.email ?? '')}</td>
+            <td>${x.anzahl_kurse}</td>
+            <td>
+                <button class="btn-icon btn-extern-bearbeiten" data-id="${x.id}" title="Bearbeiten" type="button">✏️</button>
+                <button class="btn-icon btn-icon-gefahr btn-extern-loeschen" data-id="${x.id}" title="Löschen" type="button">🗑️</button>
+            </td>
+        </tr>`).join('');
+
+    return `
+        <div class="tabelle-wrapper" style="margin-top:2rem">
+            <h3>Externe Lehrkräfte</h3>
+            <p class="tabelle-hinweis">
+                Lehrkräfte ohne Moodle-Konto, z.B. weil die Klausur an einer anderen Schule geschrieben wird.
+                Sie können sich nicht anmelden, erhalten aber die Anwesenheits-E-Mails und tragen
+                die Anwesenheit über die Links darin ein.
+            </p>
+            ${externe.length ? `
+            <table class="zuordnungs-tabelle">
+                <thead><tr><th>Name</th><th>Kürzel</th><th>E-Mail</th><th>Kurse</th><th></th></tr></thead>
+                <tbody>${zeilen}</tbody>
+            </table>` : '<p class="hinweis">Noch keine externen Lehrkräfte angelegt.</p>'}
+            <div style="margin-top:.75rem">
+                <button class="btn" id="btn-extern-neu" type="button">+ Externe Lehrkraft anlegen</button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Dialog zum Anlegen (vorhandene = null) bzw. Bearbeiten einer externen Lehrkraft.
+ * Das Kürzel lässt sich nur beim Anlegen festlegen (Kurse werden darüber zugeordnet).
+ */
+function zeigeExterneLehrkraftDialog(vorhandene, kuerzelVorbelegung, nachSpeichern) {
+    const bearbeiten = vorhandene !== null;
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+        <div class="dialog">
+            <h3>${bearbeiten ? 'Externe Lehrkraft bearbeiten' : 'Externe Lehrkraft anlegen'}</h3>
+            <p class="hinweis">Für Lehrkräfte ohne Moodle-Konto. Die E-Mail-Adresse erhält die Anwesenheits-Links.</p>
+            <div class="formular-gruppe">
+                <label for="ext-vorname">Vorname *</label>
+                <input type="text" id="ext-vorname" maxlength="100" value="${escHtml(vorhandene?.vorname ?? '')}">
+            </div>
+            <div class="formular-gruppe">
+                <label for="ext-nachname">Nachname *</label>
+                <input type="text" id="ext-nachname" maxlength="100" value="${escHtml(vorhandene?.nachname ?? '')}">
+            </div>
+            <div class="formular-gruppe">
+                <label for="ext-kuerzel">Kürzel * <span style="font-weight:normal;font-size:.85em">(wie in GoMST, z.B. „SZ“)</span></label>
+                <input type="text" id="ext-kuerzel" maxlength="20"
+                       value="${escHtml(vorhandene?.kuerzel ?? kuerzelVorbelegung ?? '')}"
+                       ${bearbeiten ? 'disabled' : ''}>
+            </div>
+            <div class="formular-gruppe">
+                <label for="ext-email">E-Mail-Adresse *</label>
+                <input type="email" id="ext-email" maxlength="255" value="${escHtml(vorhandene?.email ?? '')}">
+            </div>
+            <div class="dialog-aktionen">
+                <button class="btn" type="button" id="ext-speichern">${bearbeiten ? 'Speichern' : 'Anlegen'}</button>
+                <button class="btn btn-sekundaer" type="button" id="ext-abbrechen">Abbrechen</button>
+            </div>
+            <p id="ext-fehler" class="fehler" style="display:none"></p>
+        </div>`;
+    document.body.appendChild(overlay);
+    schliessbar(overlay);
+    overlay.querySelector('#ext-abbrechen').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#ext-vorname').focus();
+
+    overlay.querySelector('#ext-speichern').addEventListener('click', async () => {
+        const btn      = overlay.querySelector('#ext-speichern');
+        const fehlerEl = overlay.querySelector('#ext-fehler');
+        const body = {
+            vorname:  overlay.querySelector('#ext-vorname').value.trim(),
+            nachname: overlay.querySelector('#ext-nachname').value.trim(),
+            kuerzel:  overlay.querySelector('#ext-kuerzel').value.trim(),
+            email:    overlay.querySelector('#ext-email').value.trim(),
+        };
+
+        btn.disabled = true;
+        fehlerEl.style.display = 'none';
+        try {
+            await apiFetch(
+                bearbeiten ? `/stufenleitung/externe-lehrkraefte/${vorhandene.id}` : '/stufenleitung/externe-lehrkraefte',
+                { method: bearbeiten ? 'PUT' : 'POST', body: JSON.stringify(body) },
+            );
+            overlay.remove();
+            await nachSpeichern();
+        } catch (err) {
+            fehlerEl.textContent = err.message;
+            fehlerEl.style.display = '';
+            btn.disabled = false;
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -772,7 +1276,8 @@ async function zeigeKursHinzufuegenDialog(viewEl, hjId, hjLabel) {
     const lkOptionen = `<option value="">– keine –</option>` + lehrkraefte.map(lk => {
         const nachname = lk.nachname.replace(/\s*\([^)]+\)$/, '');
         const kuerzel  = lk.kuerzel ? ` (${escHtml(lk.kuerzel)})` : '';
-        return `<option value="${lk.id}">${escHtml(nachname)}, ${escHtml(lk.vorname)}${kuerzel}</option>`;
+        const extern   = lk.extern == 1 ? ' – extern' : '';
+        return `<option value="${lk.id}">${escHtml(nachname)}, ${escHtml(lk.vorname)}${kuerzel}${extern}</option>`;
     }).join('');
 
     const overlay = document.createElement('div');
@@ -858,7 +1363,7 @@ async function zeigeKursHinzufuegenDialog(viewEl, hjId, hjLabel) {
 
 function renderKursZeile(k) {
     const lehrkraft = k.lehrer_id
-        ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}`
+        ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}${k.lehrer_extern == 1 ? ' <small>(extern)</small>' : ''}`
         : k.lehrer_kuerzel
         ? `<span class="fehlend">${escHtml(k.lehrer_kuerzel)} (nicht zugeordnet)</span>`
         : '<span class="fehlend">–</span>';
@@ -1117,23 +1622,64 @@ async function viewKlausuren(el) {
     ladeKlausurenUebersicht(el.querySelector('#tab-uebersicht'));
 }
 
+// „Alle Stufen anzeigen“ in der Klausurübersicht (gilt, bis die Seite neu geladen wird)
+let klausurenAlleStufen = false;
+
 async function ladeKlausurenUebersicht(el) {
     el.innerHTML = '<p class="lade-text">Wird geladen…</p>';
     try {
+        const istSL        = hatRolle('stufenleitung');
         const nurLehrkraft = hatRolle('lehrkraft') && !hatRolle('admin', 'stufenleitung');
-        const anfragen = [apiFetch('/klausuren')];
-        if (nurLehrkraft) anfragen.push(apiFetch('/klausuren/meine-nachschreibtermine'));
-        const [klausuren, nachschreibtermine] = await Promise.all(anfragen);
-        renderKlausurenUebersicht(el, klausuren, nachschreibtermine ?? []);
+        const [klausuren, nachschreibtermine, me] = await Promise.all([
+            apiFetch('/klausuren' + (istSL && klausurenAlleStufen ? '?alle=1' : '')),
+            nurLehrkraft ? apiFetch('/klausuren/meine-nachschreibtermine') : null,
+            istSL ? apiFetch('/me') : null,
+        ]);
+        renderKlausurenUebersicht(el, klausuren, nachschreibtermine ?? [], me);
     } catch (err) {
-        el.innerHTML = `<p class="fehler">${err.message}</p>`;
+        el.innerHTML = `<p class="fehler">${escHtml(err.message)}</p>`;
     }
 }
 
-function renderKlausurenUebersicht(el, klausuren, nachschreibtermine = []) {
+/** Kopfzeile für Stufenleitungen: zeigt die eigenen Stufen und erlaubt, alle Stufen einzublenden. */
+function renderKlausurenKopf(me) {
+    if (!me) return '';
+
+    const stufen = sortiereStufen(me.stufen ?? []);
+    const info = klausurenAlleStufen
+        ? 'Angezeigt werden die Klausuren <strong>aller Stufen</strong>.'
+        : stufen.length
+            ? `Angezeigt werden die Klausuren Ihrer Stufen (${stufen.map(s =>
+                `<strong>${escHtml(s.name)}</strong> <small>${escHtml(s.schuljahr)}</small>`).join(', ')}) und Ihrer eigenen Kurse.`
+            : 'Sie sind für keine Stufe zuständig – angezeigt werden nur die Klausuren Ihrer eigenen Kurse.';
+
+    return `
+        <div class="filter-leiste">
+            <span>${info}</span>
+            <label class="checkbox-klein">
+                <input type="checkbox" id="kl-alle-stufen" ${klausurenAlleStufen ? 'checked' : ''}> Alle Stufen anzeigen
+            </label>
+            <button type="button" class="btn btn-klein btn-sekundaer" id="kl-meine-stufen">Meine Stufen verwalten</button>
+        </div>`;
+}
+
+function bindeKlausurenKopf(el) {
+    el.querySelector('#kl-alle-stufen')?.addEventListener('change', e => {
+        klausurenAlleStufen = e.target.checked;
+        ladeKlausurenUebersicht(el);
+    });
+    el.querySelector('#kl-meine-stufen')?.addEventListener('click', () => {
+        zeigeMeineStufenDialog(() => ladeKlausurenUebersicht(el));
+    });
+}
+
+function renderKlausurenUebersicht(el, klausuren, nachschreibtermine = [], me = null) {
+    const kopf = renderKlausurenKopf(me);
+
     if (klausuren.length === 0) {
-        el.innerHTML = `<div class="karte"><p>Noch keine Klausuren angelegt.
+        el.innerHTML = `${kopf}<div class="karte"><p>Keine Klausuren vorhanden.
             ${hatRolle('admin', 'stufenleitung') ? ' Nutzen Sie "Einzeln anlegen" oder "Excel-Import".' : ''}</p></div>`;
+        bindeKlausurenKopf(el);
         renderLehrkraftNachschreibtermine(el, nachschreibtermine);
         return;
     }
@@ -1157,7 +1703,7 @@ function renderKlausurenUebersicht(el, klausuren, nachschreibtermine = []) {
         b.schuljahr.localeCompare(a.schuljahr) || b.abschnitt - a.abschnitt
     );
 
-    el.innerHTML = sortiert.map(g => `
+    el.innerHTML = kopf + sortiert.map(g => `
         <div class="karte">
             <h3 class="karte-titel">${escHtml(g.label)}</h3>
             <table class="klausur-tabelle">
@@ -1181,7 +1727,9 @@ function renderKlausurenUebersicht(el, klausuren, nachschreibtermine = []) {
         </div>
     `).join('');
 
-    // Bearbeiten-Buttons (nur sichtbar wenn ist_eigene_sl)
+    bindeKlausurenKopf(el);
+
+    // Bearbeiten-Buttons (Admin/Stufenleitung, für alle Stufen)
     el.querySelectorAll('.btn-klausur-bearbeiten').forEach(btn => {
         btn.addEventListener('click', () => {
             const id = parseInt(btn.dataset.id);
@@ -1287,13 +1835,14 @@ function renderKlausurZeile(k) {
     const uhrzeit = k.termin_uhrzeit  ? k.termin_uhrzeit.substring(0, 5)  : '–';
     const dauer   = k.dauer_minuten   ? `${k.dauer_minuten} min`          : '–';
     const lk = k.lehrer_id
-        ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}`
+        ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}${k.lehrer_extern == 1 ? ' <small>(extern)</small>' : ''}`
         : `<span class="fehlend">${escHtml(k.lehrer_kuerzel ?? '–')}</span>`;
 
     const aktionen = [];
-    if (k.ist_eigene_sl == 1) {
+    if (hatRolle('admin', 'stufenleitung')) {
         aktionen.push(`<button class="btn-icon btn-klausur-bearbeiten" data-id="${k.id}" title="Bearbeiten">✏️</button>`);
-        if (k.lehrer_id) {
+        // Die Anwesenheits-Mail löst nur die Stufenleitung der jeweiligen Stufe manuell aus
+        if (k.lehrer_id && k.ist_eigene_sl == 1) {
             aktionen.push(`<button class="btn-icon btn-email-ausloesen" data-id="${k.id}" title="Anwesenheits-E-Mail senden">✉️</button>`);
         }
         aktionen.push(`<button class="btn-icon btn-icon-gefahr btn-klausur-loeschen" data-id="${k.id}" data-name="${escHtml(k.kurs_anzeigename)}" title="Löschen">🗑️</button>`);
@@ -1381,27 +1930,52 @@ async function ladeKlausurNeuFormular(el, nachSpeichern) {
 }
 
 function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
-    // Kurse nach Schuljahr/Halbjahr gruppieren
-    const gruppen = {};
-    for (const k of kurse) {
-        const key = `${k.schuljahr} / ${k.abschnitt}. HJ`;
-        (gruppen[key] ??= []).push(k);
+    if (kurse.length === 0) {
+        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">GoMST-Datei importieren →</a></p></div>';
+        return;
     }
 
-    const optionen = Object.entries(gruppen).map(([gruppe, ks]) =>
-        `<optgroup label="${escHtml(gruppe)}">
-            ${ks.map(k => `<option value="${k.id}">${escHtml(k.anzeigename)}</option>`).join('')}
-        </optgroup>`
+    // Stufen (Name + Schuljahr) aus den Kursen ableiten; Klausuren gibt es für alle Stufen
+    const stufenMap = new Map();
+    for (const k of kurse) {
+        if (!stufenMap.has(k.stufe_id)) {
+            stufenMap.set(k.stufe_id, { id: k.stufe_id, name: k.stufe, schuljahr: k.schuljahr, eigene: k.ist_eigene_sl == 1 });
+        }
+    }
+    const stufen = sortiereStufen([...stufenMap.values()]);
+
+    // Vorauswahl: die neueste Stufe, für die man selbst zuständig ist – sonst die neueste überhaupt
+    const vorauswahl = stufen.find(st => st.eigene) ?? stufen[0];
+
+    const stufenOptionen = stufen.map(st =>
+        `<option value="${st.id}"${st.id === vorauswahl.id ? ' selected' : ''}>${escHtml(st.name)} (${escHtml(st.schuljahr)})${st.eigene ? ' – meine Stufe' : ''}</option>`
     ).join('');
+
+    // Kursoptionen einer Stufe, nach Halbjahr gruppiert
+    const kursOptionen = stufeId => {
+        const nachHalbjahr = {};
+        for (const k of kurse.filter(x => x.stufe_id == stufeId)) {
+            (nachHalbjahr[k.abschnitt] ??= []).push(k);
+        }
+        return Object.keys(nachHalbjahr).sort((a, b) => b - a).map(abschnitt =>
+            `<optgroup label="${escHtml(abschnitt)}. Halbjahr">
+                ${nachHalbjahr[abschnitt].map(k => `<option value="${k.id}">${escHtml(k.anzeigename)}</option>`).join('')}
+            </optgroup>`
+        ).join('');
+    };
 
     el.innerHTML = `
         <div class="karte" style="max-width:520px">
             <h3>Neue Klausur anlegen</h3>
             <div class="formular-gruppe">
+                <label for="neu-stufe">Stufe *</label>
+                <select id="neu-stufe" class="select-zuordnung" style="max-width:100%">${stufenOptionen}</select>
+            </div>
+            <div class="formular-gruppe">
                 <label for="neu-kurs">Kurs *</label>
                 <select id="neu-kurs" class="select-zuordnung" style="max-width:100%">
                     <option value="">– Kurs wählen –</option>
-                    ${optionen}
+                    ${kursOptionen(vorauswahl.id)}
                 </select>
             </div>
             <div class="formular-gruppe">
@@ -1423,6 +1997,11 @@ function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
             <p id="neu-ok" class="ok-text" style="display:none"></p>
         </div>
     `;
+
+    el.querySelector('#neu-stufe').addEventListener('change', e => {
+        el.querySelector('#neu-kurs').innerHTML =
+            `<option value="">– Kurs wählen –</option>${kursOptionen(e.target.value)}`;
+    });
 
     el.querySelector('#neu-speichern').addEventListener('click', async () => {
         const btn     = el.querySelector('#neu-speichern');
@@ -1466,36 +2045,82 @@ function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
     });
 }
 
-function ladePasteImport(el, nachImport) {
+async function ladePasteImport(el, nachImport) {
+    el.innerHTML = '<p class="lade-text">Wird geladen…</p>';
+
+    let kurse;
+    try {
+        kurse = await apiFetch('/kurse');
+    } catch (err) {
+        el.innerHTML = `<p class="fehler">${escHtml(err.message)}</p>`;
+        return;
+    }
+
+    if (kurse.length === 0) {
+        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">GoMST-Datei importieren →</a></p></div>';
+        return;
+    }
+
+    // Halbjahre (Stufe + Schuljahr + Halbjahr) aus den Kursen ableiten: neueste zuerst
+    const halbjahrMap = new Map();
+    for (const k of kurse) {
+        if (!halbjahrMap.has(k.halbjahr_id)) {
+            halbjahrMap.set(k.halbjahr_id, {
+                id: k.halbjahr_id, stufe: k.stufe, schuljahr: k.schuljahr,
+                abschnitt: k.abschnitt, eigene: k.ist_eigene_sl == 1,
+            });
+        }
+    }
+    const halbjahre = [...halbjahrMap.values()].sort((a, b) =>
+        b.schuljahr.localeCompare(a.schuljahr) || b.abschnitt - a.abschnitt || a.stufe.localeCompare(b.stufe, 'de'));
+
+    // Vorauswahl: neuestes Halbjahr einer eigenen Stufe, sonst das neueste überhaupt
+    const vorauswahl = halbjahre.find(h => h.eigene) ?? halbjahre[0];
+
+    const optionen = halbjahre.map(h =>
+        `<option value="${h.id}"${h.id === vorauswahl.id ? ' selected' : ''}>${escHtml(h.stufe)} – ${escHtml(h.schuljahr)}, ${h.abschnitt}. Halbjahr${h.eigene ? ' – meine Stufe' : ''}</option>`
+    ).join('');
+
     el.innerHTML = `
         <div class="karte">
             <h3>Excel-Import</h3>
             <p>
-                Laden Sie die Vorlage herunter – sie enthält bereits alle Kurse des aktuellen Halbjahres.
+                Wählen Sie zuerst die Stufe (mit Halbjahr) aus, für die Sie Klausurtermine eintragen.
+                Die Vorlage enthält dann alle Kurse dieser Stufe.
                 Öffnen Sie sie in Excel, tragen Sie Datum, Uhrzeit und Dauer ein.
                 Dann alles markieren (Strg+A), kopieren (Strg+C), in das Textfeld unten klicken und einfügen (Strg+V).
             </p>
             <p class="hinweis">
                 Datum im Format <strong>TT.MM.JJJJ</strong> als Text eingeben
                 (Zellen ggf. als Text formatieren, damit Excel das Datum nicht umwandelt).
-                Die Spalte "Anzeigename" wird beim Import ignoriert.
+                Die Spalten "Anzeigename" und "TN" werden beim Import ignoriert.
+                Der Import gilt für die oben ausgewählte Stufe.
             </p>
+            <div class="formular-gruppe" style="max-width:420px">
+                <label for="paste-halbjahr">Stufe / Halbjahr</label>
+                <select id="paste-halbjahr" class="select-zuordnung" style="max-width:100%">${optionen}</select>
+            </div>
             <div style="margin-bottom:1rem">
-                <a href="/api/klausuren/vorlage" class="btn btn-sekundaer">Vorlage herunterladen (.csv)</a>
+                <a href="/api/klausuren/vorlage?halbjahr_id=${vorauswahl.id}" id="paste-vorlage" class="btn btn-sekundaer">Vorlage herunterladen (.csv)</a>
             </div>
             <textarea id="paste-feld" class="paste-textarea" placeholder="Hier einfügen (Strg+V)…" rows="10"></textarea>
             <div id="paste-vorschau"></div>
         </div>
     `;
 
+    const halbjahrSelect = el.querySelector('#paste-halbjahr');
+    halbjahrSelect.addEventListener('change', () => {
+        el.querySelector('#paste-vorlage').href = `/api/klausuren/vorlage?halbjahr_id=${halbjahrSelect.value}`;
+    });
+
     el.querySelector('#paste-feld').addEventListener('input', () => {
         const text = el.querySelector('#paste-feld').value.trim();
-        if (text) parsePasteVorschau(text, el.querySelector('#paste-vorschau'), nachImport);
+        if (text) parsePasteVorschau(text, el.querySelector('#paste-vorschau'), nachImport, () => parseInt(halbjahrSelect.value));
         else el.querySelector('#paste-vorschau').innerHTML = '';
     });
 }
 
-function parsePasteVorschau(text, vorschauEl, nachImport) {
+function parsePasteVorschau(text, vorschauEl, nachImport, holeHalbjahrId) {
     const zeilen = text.split('\n').filter(z => z.trim() !== '');
     if (zeilen.length < 2) {
         vorschauEl.innerHTML = '<p class="hinweis">Mindestens eine Kopfzeile und eine Datenzeile erforderlich.</p>';
@@ -1550,7 +2175,7 @@ function parsePasteVorschau(text, vorschauEl, nachImport) {
         ergebnisEl.innerHTML = '';
 
         try {
-            const res = await apiFetch('/klausuren/paste-import', {
+            const res = await apiFetch(`/klausuren/paste-import?halbjahr_id=${holeHalbjahrId()}`, {
                 method: 'POST',
                 body: JSON.stringify(daten),
             });
@@ -2615,32 +3240,27 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
         container.innerHTML = '<p class="lade-text">Wird geladen…</p>';
     }
 
-    let [benutzer, stufen] = await Promise.all([
-        apiFetch('/admin/benutzer'),
-        apiFetch('/admin/stufen').catch(() => []),
-    ]);
+    const benutzer = await apiFetch('/admin/benutzer');
 
     if (benutzer.length === 0) {
         container.innerHTML = '<p>Keine Benutzer*innen gefunden.</p>';
         return;
     }
 
-    const stufenOptionen = stufen.map(s =>
-        `<option value="${s.id}">${escHtml(s.name)} (${escHtml(s.schuljahr)})</option>`
-    ).join('');
-
     const zeilen = benutzer.map(b => {
         const rArr   = b.rollen ?? [];
         const badges = rArr.length
             ? rArr.map(r => `<span class="rolle-badge rolle-${r}">${r}</span>`).join(' ')
             : '<span class="fehlend">–</span>';
+        // Externe Lehrkräfte haben kein Moodle-Konto und können keine Rollen erhalten
+        const extern = b.extern == 1;
         return `
         <tr data-id="${b.id}">
-            <td>${escHtml(b.nachname)}, ${escHtml(b.vorname)}</td>
+            <td>${escHtml(b.nachname)}, ${escHtml(b.vorname)}${extern ? ' <small>(extern)</small>' : ''}</td>
             <td class="td-rollen">${badges}</td>
             <td>
-                <button class="btn-icon btn-rollen-bearbeiten"
-                        data-id="${b.id}" title="Rollen bearbeiten">✏️</button>
+                ${extern ? '' : `<button class="btn-icon btn-rollen-bearbeiten"
+                        data-id="${b.id}" title="Rollen bearbeiten">✏️</button>`}
             </td>
         </tr>`;
     }).join('');
@@ -2659,12 +3279,6 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
             const row  = container.querySelector(`tr[data-id="${bid}"]`);
             const b    = benutzer.find(x => x.id === bid);
             const rArr = b.rollen ?? [];
-
-            // Stufen-Zuordnungen laden wenn SL
-            let slStufen = [];
-            if (rArr.includes('stufenleitung')) {
-                slStufen = await apiFetch(`/admin/benutzer/${bid}/stufenleitungen`).catch(() => []);
-            }
 
             const ichSelbst = bid === window.KLAUSURPLAN_ME_ID;
 
@@ -2691,12 +3305,10 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
                     <div class="formular-gruppe">
                         ${rollenZeilen}
                     </div>
-                    <div id="sl-stufen-abschnitt" style="${rArr.includes('stufenleitung') ? '' : 'display:none'}">
-                        <label style="font-size:.875rem;font-weight:600">Stufen (Stufenleitung):</label>
-                        <select id="sl-stufen" multiple size="5" style="width:100%;margin-top:.3rem;border:1px solid #ccc;border-radius:3px;padding:.3rem">
-                            ${stufenOptionen}
-                        </select>
-                    </div>
+                    <p class="hinweis" id="sl-stufen-hinweis" style="${rArr.includes('stufenleitung') ? '' : 'display:none'}">
+                        Für welche Stufen eine Stufenleitung zuständig ist, verwaltet sie selbst
+                        (auf der Übersichtsseite unter „Meine Stufen“ und automatisch beim GoMST-Import).
+                    </p>
                     <div class="dialog-aktionen">
                         <button class="btn" id="rollen-speichern">Speichern</button>
                         <button class="btn btn-sekundaer" id="rollen-abbrechen">Abbrechen</button>
@@ -2707,16 +3319,9 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
             schliessbar(overlay);
             overlay.querySelector('#rollen-abbrechen').addEventListener('click', () => overlay.remove());
 
-            // Vorselektierte Stufen
-            const slSelect = overlay.querySelector('#sl-stufen');
-            slStufen.forEach(sid => {
-                const opt = slSelect.querySelector(`option[value="${sid}"]`);
-                if (opt) opt.selected = true;
-            });
-
-            // Stufenleitung-Checkbox zeigt/versteckt Stufen-Picker
+            // Hinweis zur Selbstverwaltung der Stufen nur bei aktiver Stufenleitung-Rolle
             overlay.querySelector('.cb-rolle[value="stufenleitung"]').addEventListener('change', e => {
-                overlay.querySelector('#sl-stufen-abschnitt').style.display = e.target.checked ? '' : 'none';
+                overlay.querySelector('#sl-stufen-hinweis').style.display = e.target.checked ? '' : 'none';
             });
 
             overlay.querySelector('#rollen-speichern').addEventListener('click', async () => {
@@ -2729,21 +3334,11 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
                 const neueRollen = [...overlay.querySelectorAll('.cb-rolle')].filter(cb =>
                     cb.disabled ? cb.hasAttribute('checked') : cb.checked
                 ).map(cb => cb.value);
-                const neueStufen = neueRollen.includes('stufenleitung')
-                    ? [...slSelect.selectedOptions].map(o => parseInt(o.value))
-                    : [];
-
                 try {
                     await apiFetch(`/admin/benutzer/${bid}/rollen`, {
                         method: 'POST',
                         body: JSON.stringify({ rollen: neueRollen }),
                     });
-                    if (neueRollen.includes('stufenleitung')) {
-                        await apiFetch(`/admin/benutzer/${bid}/stufenleitungen`, {
-                            method: 'POST',
-                            body: JSON.stringify({ stufen_ids: neueStufen }),
-                        });
-                    }
                     b.rollen = neueRollen;
                     const badges = neueRollen.length
                         ? neueRollen.map(r => `<span class="rolle-badge rolle-${r}">${r}</span>`).join(' ')

@@ -19,7 +19,7 @@ class AdminApi
         $db   = Database::getInstance();
         $stmt = $db->query(
             'SELECT b.id, b.moodle_id, b.vorname, b.nachname, b.email,
-                    b.kuerzel, b.zuletzt_gesehen,
+                    b.kuerzel, b.extern, b.zuletzt_gesehen,
                     GROUP_CONCAT(r.rolle ORDER BY r.rolle SEPARATOR \',\') AS rollen_csv
              FROM benutzer b
              LEFT JOIN rollen r ON r.benutzer_id = b.id

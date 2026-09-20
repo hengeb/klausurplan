@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Klausurplan\Import;
 
 use Klausurplan\Models\Database;
+use Klausurplan\Models\Zuordnung;
 use RuntimeException;
 
 class GomstImporter
@@ -30,7 +31,7 @@ class GomstImporter
     /**
      * Importiert eine GoMST-.dat-Datei (pipe-getrennt, UTF-8 mit BOM, CRLF).
      *
-     * @return array{kurse: int, schueler: int, entfernt: int, halbjahre: int}
+     * @return array{kurse: int, schueler: int, entfernt: int, halbjahre: int, stufen_ids: list<int>}
      */
     public function importiere(string $dateiInhalt): array
     {
@@ -46,6 +47,7 @@ class GomstImporter
         // kurs_id → [name_roh => true] – zum Erkennen veralteter Schüler*innen
         $verarbeitet = [];
         $halbjahrIds = [];
+        $stufenIds   = [];
 
         $schuelerAnzahl = 0;
 
@@ -76,6 +78,7 @@ class GomstImporter
             $stufeId    = $this->findeOderLegeAnStufe($jahrgang, $schuljahr);
             $halbjahrId = $this->findeOderLegeAnHalbjahr($stufeId, $abschnitt);
             $halbjahrIds[$halbjahrId] = true;
+            $stufenIds[$stufeId]      = true;
 
             $kursId = $this->findeOderLegeAnKurs(
                 $halbjahrId, $kursKuerzel, $fachKuerzel,
@@ -95,14 +98,16 @@ class GomstImporter
         $kursIds  = array_keys($verarbeitet);
         $entfernt = $this->entferneVeralteteSchueler($verarbeitet);
 
-        $this->automatischesNamensmatching($kursIds);
-        $this->lehrerKuerzelMatching($kursIds);
+        // Gespeicherte Zuordnungen anwenden, Rest automatisch matchen
+        Zuordnung::ordneSchuelerZu($this->db, $kursIds);
+        Zuordnung::ordneLehrerZu($this->db, $kursIds);
 
         return [
-            'kurse'     => count($kursIds),
-            'schueler'  => $schuelerAnzahl,
-            'entfernt'  => $entfernt,
-            'halbjahre' => count($halbjahrIds),
+            'kurse'      => count($kursIds),
+            'schueler'   => $schuelerAnzahl,
+            'entfernt'   => $entfernt,
+            'halbjahre'  => count($halbjahrIds),
+            'stufen_ids' => array_keys($stufenIds),
         ];
     }
 
@@ -302,82 +307,6 @@ class GomstImporter
         }
 
         return $entfernt;
-    }
-
-    // ------------------------------------------------------------------
-    // Matching
-    // ------------------------------------------------------------------
-
-    /**
-     * Ordnet nicht zugeordnete kurs_schueler-Einträge anhand des Namens zu.
-     * Abgleich: "Nachname|Vorname" aus GoMST ↔ benutzer.nachname + benutzer.vorname
-     */
-    private function automatischesNamensmatching(array $kursIds): void
-    {
-        if (empty($kursIds)) {
-            return;
-        }
-
-        $platzhalter = implode(',', array_fill(0, count($kursIds), '?'));
-        $stmt        = $this->db->prepare(
-            "SELECT id, name_roh FROM kurs_schueler
-             WHERE kurs_id IN ($platzhalter) AND schueler_id IS NULL"
-        );
-        $stmt->execute($kursIds);
-
-        foreach ($stmt->fetchAll() as $ks) {
-            [$nachname, $vorname] = array_pad(explode('|', $ks['name_roh'], 2), 2, '');
-            $nachname = trim($nachname);
-            $vorname  = trim($vorname);
-            // Erster Vorname (bis zum ersten Leerzeichen) für Teilübereinstimmung
-            $erstVorname = strtok($vorname, ' ');
-
-            // Exakte Übereinstimmung zuerst, dann Fallback auf ersten Vornamen
-            $benutzer = $this->db->prepare(
-                'SELECT id FROM benutzer
-                 WHERE LOWER(TRIM(nachname)) = LOWER(?)
-                   AND (LOWER(TRIM(vorname)) = LOWER(?)
-                        OR LOWER(TRIM(SUBSTRING_INDEX(vorname, \' \', 1))) = LOWER(?))
-                 ORDER BY CASE WHEN LOWER(TRIM(vorname)) = LOWER(?) THEN 0 ELSE 1 END
-                 LIMIT 1'
-            );
-            $benutzer->execute([$nachname, $vorname, $erstVorname, $vorname]);
-            $benutzerId = $benutzer->fetchColumn();
-
-            if ($benutzerId !== false) {
-                $this->db->prepare(
-                    'UPDATE kurs_schueler SET schueler_id = ? WHERE id = ?'
-                )->execute([$benutzerId, $ks['id']]);
-            }
-        }
-    }
-
-    /** Ordnet Kurse ihren Lehrkräften anhand des Kürzels zu. */
-    private function lehrerKuerzelMatching(array $kursIds): void
-    {
-        if (empty($kursIds)) {
-            return;
-        }
-
-        $platzhalter = implode(',', array_fill(0, count($kursIds), '?'));
-        $stmt        = $this->db->prepare(
-            "SELECT id, lehrer_kuerzel FROM kurse
-             WHERE id IN ($platzhalter) AND lehrer_kuerzel IS NOT NULL AND lehrer_id IS NULL"
-        );
-        $stmt->execute($kursIds);
-
-        foreach ($stmt->fetchAll() as $kurs) {
-            $lehrer = $this->db->prepare(
-                'SELECT id FROM benutzer WHERE UPPER(kuerzel) = UPPER(?)'
-            );
-            $lehrer->execute([$kurs['lehrer_kuerzel']]);
-            $lehrerId = $lehrer->fetchColumn();
-
-            if ($lehrerId !== false) {
-                $this->db->prepare('UPDATE kurse SET lehrer_id = ? WHERE id = ?')
-                    ->execute([$lehrerId, $kurs['id']]);
-            }
-        }
     }
 
     // ------------------------------------------------------------------

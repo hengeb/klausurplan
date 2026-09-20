@@ -124,6 +124,40 @@ $router->post('/stufenleitung/zuordnungen', function (): array {
     return StufenleitungApi::postZuordnung($body);
 }, 'admin', 'stufenleitung');
 
+$router->get('/stufenleitung/moodle-schueler', function (): array {
+    return StufenleitungApi::getMoodleSchueler();
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Stufenleitung – Externe Lehrkräfte (ohne Moodle-Konto)
+// ------------------------------------------------------------------
+$router->post('/stufenleitung/externe-lehrkraefte', function (): array {
+    return StufenleitungApi::addExterneLehrkraft(Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+$router->put('/stufenleitung/externe-lehrkraefte/{id}', function (array $p): array {
+    return StufenleitungApi::updateExterneLehrkraft((int) $p['id'], Router::jsonBody());
+}, 'admin', 'stufenleitung');
+
+$router->delete('/stufenleitung/externe-lehrkraefte/{id}', function (array $p): array {
+    return StufenleitungApi::deleteExterneLehrkraft((int) $p['id']);
+}, 'admin', 'stufenleitung');
+
+// ------------------------------------------------------------------
+// Stufenleitung – Eigene Stufen verwalten (Self-Service)
+// ------------------------------------------------------------------
+$router->get('/stufenleitung/meine-stufen', function (): array {
+    return StufenleitungApi::getMeineStufen();
+}, 'stufenleitung');
+
+$router->put('/stufenleitung/meine-stufen/{stufe_id}', function (array $p): array {
+    return StufenleitungApi::meineStufeUebernehmen((int) $p['stufe_id']);
+}, 'stufenleitung');
+
+$router->delete('/stufenleitung/meine-stufen/{stufe_id}', function (array $p): array {
+    return StufenleitungApi::meineStufeAbgeben((int) $p['stufe_id']);
+}, 'stufenleitung');
+
 // ------------------------------------------------------------------
 // Stufenleitung – Halbjahre & Kurse
 // ------------------------------------------------------------------
@@ -177,7 +211,10 @@ $router->post('/klausuren/paste-import', function (): array {
         http_response_code(400);
         return ['fehler' => 'Array erwartet'];
     }
-    return LehrkraftApi::postPasteImport($zeilen);
+    // Optional: Kurse nur in diesem Halbjahr suchen (?halbjahr_id=X)
+    $halbjahrId = isset($_GET['halbjahr_id']) && (int) $_GET['halbjahr_id'] > 0
+        ? (int) $_GET['halbjahr_id'] : null;
+    return LehrkraftApi::postPasteImport($zeilen, $halbjahrId);
 }, 'admin', 'stufenleitung');
 
 $router->post('/klausuren', function (): array {

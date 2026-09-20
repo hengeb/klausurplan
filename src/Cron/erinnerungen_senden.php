@@ -116,4 +116,73 @@ foreach ($klausuren as $kl) {
     }
 }
 
-echo "\nFertig: {$gesendet} gesendet, {$fehler} Fehler.\n";
+// ------------------------------------------------------------------
+// Übersicht für die Stufenleitung (nur Klausuren der eigenen Stufe(n))
+// ------------------------------------------------------------------
+// Wenn eine Woche nach dem Klausurtermin noch keine Anwesenheit erfasst ist, bekommt die
+// Stufenleitung einmalig pro Klausur eine Sammelmail. Die Fachlehrkraft wird dadurch
+// nicht zusätzlich angeschrieben.
+
+$stufenleitungen = $db->query(
+    "SELECT DISTINCT b.id, b.email, b.vorname, b.nachname
+     FROM benutzer b
+     JOIN rollen r           ON r.benutzer_id = b.id AND r.rolle = 'stufenleitung'
+     JOIN stufenleitungen sl ON sl.benutzer_id = b.id
+     WHERE b.email IS NOT NULL AND b.email <> ''"
+)->fetchAll();
+
+$offen = $db->prepare(
+    "SELECT kl.id, kl.klausur_nr, kl.termin_datum,
+            k.anzeigename AS kurs_anzeigename,
+            s.name AS stufe, s.schuljahr,
+            TRIM(CONCAT(COALESCE(lb.vorname, ''), ' ', COALESCE(lb.nachname, ''))) AS lehrkraft
+     FROM klausuren kl
+     JOIN kurse k     ON k.id = kl.kurs_id
+     JOIN halbjahre h ON h.id = k.halbjahr_id
+     JOIN stufen s    ON s.id = h.stufe_id
+     JOIN stufenleitungen sl ON sl.stufe_id = s.id AND sl.benutzer_id = ?
+     LEFT JOIN benutzer lb   ON lb.id = k.lehrer_id
+     WHERE kl.termin_datum IS NOT NULL
+       AND TIMESTAMP(kl.termin_datum, COALESCE(kl.termin_uhrzeit, '23:59:59')) < NOW() - INTERVAL 7 DAY
+       AND EXISTS (SELECT 1 FROM kurs_schueler ks WHERE ks.kurs_id = k.id)
+       AND NOT EXISTS (SELECT 1 FROM anwesenheiten a
+                       WHERE a.klausur_id = kl.id AND a.status <> 'ausstehend')
+       AND NOT EXISTS (SELECT 1 FROM stufenleitung_erinnerungen e
+                       WHERE e.klausur_id = kl.id AND e.benutzer_id = sl.benutzer_id)
+     ORDER BY s.schuljahr DESC, s.name, kl.termin_datum, k.anzeigename"
+);
+
+$slGesendet = 0;
+
+foreach ($stufenleitungen as $sl) {
+    $offen->execute([$sl['id']]);
+    $klausurenOffen = $offen->fetchAll();
+    if (empty($klausurenOffen)) {
+        continue;
+    }
+
+    try {
+        Mailer::send(
+            $sl['email'],
+            trim($sl['vorname'] . ' ' . $sl['nachname']),
+            'Klausurplan: Anwesenheit noch nicht eingetragen',
+            EmailTemplates::stufenleitungUebersicht($klausurenOffen),
+        );
+
+        $markieren = $db->prepare(
+            'INSERT IGNORE INTO stufenleitung_erinnerungen (klausur_id, benutzer_id) VALUES (?, ?)'
+        );
+        foreach ($klausurenOffen as $kl) {
+            $markieren->execute([$kl['id'], $sl['id']]);
+        }
+
+        $slGesendet++;
+        echo date('[H:i:s]') . ' OK  (Stufenleitung): ' . count($klausurenOffen) . " Klausur(en) → {$sl['email']}\n";
+
+    } catch (Throwable $e) {
+        $fehler++;
+        echo date('[H:i:s]') . " ERR (Stufenleitung): {$sl['email']} → {$e->getMessage()}\n";
+    }
+}
+
+echo "\nFertig: {$gesendet} gesendet, {$slGesendet} Übersicht(en) an Stufenleitungen, {$fehler} Fehler.\n";

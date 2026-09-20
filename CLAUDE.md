@@ -87,8 +87,9 @@ klausurplan/
 │       └── erinnerungen_senden.php  ← CLI-Script für Cronjob
 │
 └── migrations/
-    ├── 001_schema.sql
-    └── 002_faecher_lookup.sql
+    ├── 001_schema.sql               ← vollständiges aktuelles Schema (Neuinstallation)
+    ├── 002_remove_raum.sql          ← Delta für bestehende Installationen
+    └── 003_zuordnungen_extern.sql   ← Delta: dauerhafte Zuordnungen, externe Lehrkräfte, SL-Mails
 ```
 
 ---
@@ -420,7 +421,15 @@ MOODLE_API_TOKEN=xxxx
 
 ## Namensmatching (GoMST ↔ Moodle-Benutzer)
 
-**Automatisch bei Import:**
+**Dauerhafte Zuordnungen:** Manuelle Zuordnungen werden personenbezogen in
+`schueler_zuordnungen` (GoMST-Name → Moodle-Konto) bzw. `lehrer_zuordnungen`
+(Lehrerkürzel → Lehrkraft) gespeichert – nicht an Kursen. Sie überleben das Löschen von Kursen
+und Halbjahren und werden bei jedem Import (und beim Hinzufügen von Prüflingen) zuerst
+angewendet; erst danach greift das automatische Matching (`Models/Zuordnung.php`).
+`benutzer_id = NULL` bedeutet „bewusst aufgehoben“ – dann wird nicht automatisch neu zugeordnet.
+Zuordnungen (auch automatische) lassen sich in der Zuordnungs-Ansicht ändern und aufheben.
+
+**Automatisch bei Import** (nach den gespeicherten Zuordnungen):
 1. Vollständiger Name aus GoMST: `Nachname Vorname` (z.B. `Mustermann Max`)
 2. Vergleich mit `benutzer.nachname + ' ' + benutzer.vorname`
 3. Bei exakter Übereinstimmung (case-insensitive, trim): direkt zuordnen
@@ -432,6 +441,10 @@ MOODLE_API_TOKEN=xxxx
   - Rechts: nicht zugeordnete Moodle-Benutzer (keiner Klausur zugeordnet)
 - Per Dropdown oder Drag & Drop zusammenführen
 - Auch Lehrer: `kurse.lehrer_id IS NULL` → Kürzel-Matching versuchen, sonst manuell
+- **Externe Lehrkräfte** (kein Moodle-Konto, z.B. Klausur an anderer Schule): werden mit Name,
+  Kürzel und E-Mail angelegt (`benutzer.extern = 1`, Platzhalter-`moodle_id` `extern:…`, Rolle
+  `lehrkraft`). Sie können sich nicht anmelden, erhalten aber die Anwesenheits-Mails samt
+  Token-Links. Der Moodle-Sync fasst sie nicht an.
 
 **Lehrerkürzel-Matching:**
 - GoMST-Spalte `Fachlehrer` enthält die Paraphe (z.B. `SZ`)
@@ -457,8 +470,17 @@ MOODLE_API_TOKEN=xxxx
 | Eigene Klausuren + Schüler sehen | ✓ | ✓ | ✓ | – |
 | Eigene Klausurtermine sehen | ✓ | ✓ | ✓ | ✓ |
 
-`*` Stufenleitung nur für ihre eigenen Stufen
+`*` Stufenleitung nur für ihre eigenen Stufen – **Ausnahmen:** GoMST-Import, Nutzerzuordnung
+und Klausuren anlegen/bearbeiten gelten für *alle* Stufen.
 `**` Lehrkraft nur für ihre eigenen Kurse/Klausuren
+
+**Stufenleitung – Zuständigkeit:** Wer die Rolle `stufenleitung` hat, verwaltet selbst, für
+welche Stufen sie/er zuständig ist (Self-Service, „Meine Stufen“); Admins müssen das nicht tun.
+Es kann auch keine Stufe zugewiesen sein. Beim GoMST-Import wird man automatisch für die
+importierten Stufen zuständig (Anzeige im Ergebnis, Abgeben per Klick). Die Zuständigkeit
+bestimmt, welche Klausuren standardmäßig in der Liste stehen (eine Liste je Stufe/Halbjahr;
+„Alle Stufen anzeigen“ blendet den Rest ein), wer die manuelle Anwesenheits-Mail auslösen kann
+und wer die Übersichtsmail (siehe E-Mail-System) erhält.
 
 **Rollen schließen sich nicht aus.** Eine Person kann gleichzeitig `lehrkraft`
 UND `stufenleitung` sein. Die UI zeigt dann alle verfügbaren Bereiche.
@@ -478,6 +500,11 @@ UND `stufenleitung` sein. Die UI zeigt dann alle verfügbaren Bereiche.
 ```
 0 * * * * php /var/www/klausurplan/src/Cron/erinnerungen_senden.php
 ```
+
+**Übersicht für die Stufenleitung (ebenfalls Cronjob):** Ist eine Woche nach dem Klausurtermin
+noch keine Anwesenheit erfasst, erhält jede zuständige Stufenleitung (nur für die *eigenen*
+Stufen) einmalig pro Klausur eine Sammelmail (`stufenleitung_erinnerungen` verhindert
+Wiederholungen). Die Fachlehrkräfte werden dadurch nicht zusätzlich angeschrieben.
 
 **Mail-Inhalt (Erstmeldung):**
 ```
@@ -525,7 +552,11 @@ PUT  /api/admin/faecher/{kuerzel}     → Fach bearbeiten
 # Stufenleitung
 POST /api/stufenleitung/gomst-import         → GoMST-Datei hochladen
 GET  /api/stufenleitung/zuordnungen          → nicht zugeordnete Namen
-POST /api/stufenleitung/zuordnungen          → manuelle Zuordnung speichern
+POST /api/stufenleitung/zuordnungen          → Zuordnung speichern/ändern/aufheben (dauerhaft)
+GET  /api/stufenleitung/moodle-schueler      → alle Moodle-Konten (zum Korrigieren)
+POST/PUT/DELETE /api/stufenleitung/externe-lehrkraefte[/{id}]  → externe Lehrkräfte
+GET  /api/stufenleitung/meine-stufen         → alle Stufen mit Flag „meine“
+PUT/DELETE /api/stufenleitung/meine-stufen/{stufe_id}  → Zuständigkeit übernehmen/abgeben
 GET  /api/stufenleitung/anwesenheiten/{halbjahr_id}  → Übersicht
 POST /api/stufenleitung/entschuldigung/{anwesenheit_id}
 POST /api/stufenleitung/email-ausloesen/{klausur_id}  → manuelle Mail
@@ -538,10 +569,11 @@ PUT  /api/nachschreibtermine/{id}
 POST /api/nachschreibtermine/{id}/klausuren  → Klausuren verknüpfen
 
 # Klausuren
-GET  /api/klausuren                   → eigene (Lehrkraft) oder alle (SL/Admin)
+GET  /api/klausuren                   → Lehrkraft: eigene; SL: eigene Stufen (?alle=1 = alle); Admin: alle
+GET  /api/klausuren/vorlage?halbjahr_id=X  → CSV-Vorlage für ein Halbjahr (Stufe)
 POST /api/klausuren                   → Klausur anlegen
 PUT  /api/klausuren/{id}
-POST /api/klausuren/paste-import      → Excel-Paste-Daten
+POST /api/klausuren/paste-import?halbjahr_id=X  → Excel-Paste-Daten (Kurse nur in diesem Halbjahr)
 
 # Anwesenheit
 GET  /api/anwesenheit/{klausur_id}

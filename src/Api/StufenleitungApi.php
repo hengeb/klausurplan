@@ -9,6 +9,7 @@ use Klausurplan\Import\GomstImporter;
 use Klausurplan\Mail\EmailTemplates;
 use Klausurplan\Mail\Mailer;
 use Klausurplan\Models\Database;
+use Klausurplan\Models\Zuordnung;
 use RuntimeException;
 
 class StufenleitungApi
@@ -20,7 +21,12 @@ class StufenleitungApi
     /**
      * Verarbeitet einen GoMST-Datei-Upload (multipart/form-data, Feld "datei").
      *
-     * @return array{kurse: int, schueler: int, entfernt: int, halbjahre: int}
+     * Wer die Rolle Stufenleitung hat, wird für alle importierten Stufen automatisch
+     * Stufenleitung. Die dabei neu hinzugekommenen Stufen stehen in `stufenleitung_neu`
+     * (damit die Oberfläche sie anzeigen und per Klick wieder abgeben lassen kann).
+     *
+     * @return array{kurse: int, schueler: int, entfernt: int, halbjahre: int,
+     *               stufenleitung_neu: list<array{id: int, name: string, schuljahr: string}>}
      */
     public static function gomstImport(): array
     {
@@ -37,9 +43,115 @@ class StufenleitungApi
             throw new RuntimeException('Datei konnte nicht gelesen werden oder ist leer.');
         }
 
-        $benutzer = Session::getBenutzer();
-        $importer = new GomstImporter((int) $benutzer['id']);
-        return $importer->importiere($inhalt);
+        $db         = Database::getInstance();
+        $benutzer   = Session::getBenutzer();
+        $benutzerId = (int) $benutzer['id'];
+        $istSL      = in_array('stufenleitung', $benutzer['rollen'] ?? [], true);
+
+        $vorher = $istSL ? self::eigeneStufenIds($db, $benutzerId) : [];
+
+        $importer = new GomstImporter($benutzerId);
+        $ergebnis = $importer->importiere($inhalt);
+
+        $stufenIds = $ergebnis['stufen_ids'];
+        unset($ergebnis['stufen_ids']);
+
+        $neu = [];
+        if ($istSL && !empty($stufenIds)) {
+            $ins = $db->prepare('INSERT IGNORE INTO stufenleitungen (benutzer_id, stufe_id) VALUES (?, ?)');
+            foreach ($stufenIds as $stufeId) {
+                $ins->execute([$benutzerId, $stufeId]);
+            }
+
+            // „Neu“ = vor dem Import noch nicht zuständig (auch wenn die Übernahme
+            // von der Vorgängerstufe schon beim Anlegen der Stufe passiert ist)
+            $ph   = implode(',', array_fill(0, count($stufenIds), '?'));
+            $stmt = $db->prepare(
+                "SELECT s.id, s.name, s.schuljahr
+                 FROM stufen s
+                 JOIN stufenleitungen sl ON sl.stufe_id = s.id AND sl.benutzer_id = ?
+                 WHERE s.id IN ($ph)
+                 ORDER BY s.schuljahr DESC, s.name"
+            );
+            $stmt->execute([$benutzerId, ...$stufenIds]);
+            foreach ($stmt->fetchAll() as $stufe) {
+                if (!in_array((int) $stufe['id'], $vorher, true)) {
+                    $neu[] = [
+                        'id'        => (int) $stufe['id'],
+                        'name'      => $stufe['name'],
+                        'schuljahr' => $stufe['schuljahr'],
+                    ];
+                }
+            }
+        }
+
+        $ergebnis['stufenleitung_neu'] = $neu;
+        return $ergebnis;
+    }
+
+    /** @return list<int> Stufen-IDs, für die der Benutzer Stufenleitung ist. */
+    private static function eigeneStufenIds(\PDO $db, int $benutzerId): array
+    {
+        $stmt = $db->prepare('SELECT stufe_id FROM stufenleitungen WHERE benutzer_id = ?');
+        $stmt->execute([$benutzerId]);
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    // ------------------------------------------------------------------
+    // Eigene Stufen verwalten (Self-Service der Stufenleitung)
+    // ------------------------------------------------------------------
+
+    /**
+     * Alle Stufen mit Flag, ob die angemeldete Person dafür zuständig ist.
+     * Jede Stufenleitung verwaltet ihre Zuständigkeit selbst – ohne Admin.
+     *
+     * @return list<array{id: int, name: string, schuljahr: string, ist_meine: int}>
+     */
+    public static function getMeineStufen(): array
+    {
+        Session::requireRolle('stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare(
+            "SELECT s.id, s.name, s.schuljahr,
+                    (sl.benutzer_id IS NOT NULL) AS ist_meine
+             FROM stufen s
+             LEFT JOIN stufenleitungen sl ON sl.stufe_id = s.id AND sl.benutzer_id = ?
+             ORDER BY s.schuljahr DESC, s.name"
+        );
+        $stmt->execute([Session::getBenutzerId()]);
+        return $stmt->fetchAll();
+    }
+
+    /** Übernimmt die Zuständigkeit für eine Stufe. */
+    public static function meineStufeUebernehmen(int $stufeId): array
+    {
+        Session::requireRolle('stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('SELECT 1 FROM stufen WHERE id = ?');
+        $stmt->execute([$stufeId]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Stufe $stufeId nicht gefunden.");
+        }
+
+        $db->prepare('INSERT IGNORE INTO stufenleitungen (benutzer_id, stufe_id) VALUES (?, ?)')
+           ->execute([Session::getBenutzerId(), $stufeId]);
+
+        return ['ok' => true];
+    }
+
+    /** Gibt die Zuständigkeit für eine Stufe ab. */
+    public static function meineStufeAbgeben(int $stufeId): array
+    {
+        Session::requireRolle('stufenleitung');
+        $db = Database::getInstance();
+
+        $db->prepare('DELETE FROM stufenleitungen WHERE benutzer_id = ? AND stufe_id = ?')
+           ->execute([Session::getBenutzerId(), $stufeId]);
+
+        return ['ok' => true];
     }
 
     // ------------------------------------------------------------------
@@ -47,18 +159,21 @@ class StufenleitungApi
     // ------------------------------------------------------------------
 
     /**
-     * Liefert alle nicht zugeordneten Einträge für die manuelle Zuordnungs-UI:
-     * - Schüler*innen aus GoMST ohne Moodle-Konto-Match
-     * - Moodle-Nutzer*innen ohne Kurszuordnung
-     * - Kurse ohne Lehrkraft-Zuordnung
-     * - Lehrkräfte ohne Kurszuordnung
+     * Liefert die Daten für die Zuordnungs-UI:
+     * - schueler_gomst:        GoMST-Namen ohne Moodle-Konto
+     * - schueler_moodle:       Moodle-Konten (ohne Lehrkräfte), die noch keinem GoMST-Namen zugeordnet sind
+     * - schueler_zugeordnet:   bereits zugeordnete GoMST-Namen (zum Korrigieren/Aufheben)
+     * - lehrkraefte_kurse:     Lehrerkürzel ohne Lehrkraft
+     * - lehrkraefte_moodle:    alle Lehrkräfte (inkl. externer) mit Flag `vergeben`
+     * - lehrkraefte_zugeordnet: bereits zugeordnete Kürzel (zum Korrigieren/Aufheben)
+     * - externe_lehrkraefte:   Lehrkräfte ohne Moodle-Konto
      */
     public static function getZuordnungen(): array
     {
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
-        // Alle nicht zugeordneten Prüflinge – GoMST-Einträge (mit '|') und Zusatzschüler
+        // Nicht zugeordnete Prüflinge – GoMST-Einträge (mit '|') und Zusatzschüler
         $schuelerGomst = $db->query(
             "SELECT ks.name_roh,
                     COUNT(DISTINCT ks.id)                                         AS anzahl_kurse,
@@ -72,18 +187,48 @@ class StufenleitungApi
              ORDER BY ks.name_roh"
         )->fetchAll();
 
-        // Moodle-Nutzer*innen ohne Schüler*innen-Zuordnung, die keine Lehrkraft-Rolle haben
+        // Moodle-Konten, die noch keinem GoMST-Namen zugeordnet sind (weder aktuell noch dauerhaft)
         $schuelerMoodle = $db->query(
             "SELECT b.id, b.vorname, b.nachname, b.stufe
              FROM benutzer b
-             WHERE NOT EXISTS (
-                     SELECT 1 FROM kurs_schueler ks WHERE ks.schueler_id = b.id
-                   )
-               AND NOT EXISTS (
-                     SELECT 1 FROM rollen r WHERE r.benutzer_id = b.id AND r.rolle = 'lehrkraft'
-                   )
+             WHERE NOT EXISTS (SELECT 1 FROM kurs_schueler ks WHERE ks.schueler_id = b.id)
+               AND NOT EXISTS (SELECT 1 FROM schueler_zuordnungen z WHERE z.benutzer_id = b.id)
+               AND NOT EXISTS (SELECT 1 FROM rollen r WHERE r.benutzer_id = b.id AND r.rolle = 'lehrkraft')
              ORDER BY b.nachname, b.vorname"
         )->fetchAll();
+
+        // Bereits zugeordnete Namen: aktuell in Kursen vorkommende …
+        $schuelerZugeordnet = $db->query(
+            "SELECT ks.name_roh,
+                    ks.schueler_id,
+                    b.vorname, b.nachname, b.stufe AS moodle_stufe,
+                    COUNT(DISTINCT ks.id)                                         AS anzahl_kurse,
+                    GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ')  AS stufen,
+                    MAX(z.name_roh IS NOT NULL)                                   AS manuell
+             FROM kurs_schueler ks
+             JOIN benutzer b  ON b.id = ks.schueler_id
+             JOIN kurse k     ON k.id = ks.kurs_id
+             JOIN halbjahre h ON h.id = k.halbjahr_id
+             JOIN stufen s    ON s.id = h.stufe_id
+             LEFT JOIN schueler_zuordnungen z ON z.name_roh = ks.name_roh
+             WHERE ks.schueler_id IS NOT NULL
+             GROUP BY ks.name_roh, ks.schueler_id, b.vorname, b.nachname, b.stufe"
+        )->fetchAll();
+
+        // … und gespeicherte Zuordnungen, deren Kurse (noch) nicht vorhanden sind
+        $schuelerGespeichert = $db->query(
+            "SELECT z.name_roh,
+                    z.benutzer_id AS schueler_id,
+                    b.vorname, b.nachname, b.stufe AS moodle_stufe,
+                    0 AS anzahl_kurse, '' AS stufen, 1 AS manuell
+             FROM schueler_zuordnungen z
+             JOIN benutzer b ON b.id = z.benutzer_id
+             WHERE NOT EXISTS (SELECT 1 FROM kurs_schueler ks WHERE ks.name_roh = z.name_roh)"
+        )->fetchAll();
+
+        $schuelerZugeordnet = array_merge($schuelerZugeordnet, $schuelerGespeichert);
+        usort($schuelerZugeordnet, static fn (array $x, array $y): int
+            => strnatcasecmp($x['name_roh'], $y['name_roh']));
 
         // Personen mit unbekanntem Kürzel – eine Zeile pro Kürzel
         $lehrkraefteKurse = $db->query(
@@ -96,25 +241,73 @@ class StufenleitungApi
              ORDER BY k.lehrer_kuerzel"
         )->fetchAll();
 
-        // Moodle-Lehrkräfte ohne Kurszuordnung (Rolle 'lehrkraft', egal ob Kürzel vorhanden)
+        // Alle Lehrkräfte (auch externe); `vergeben` = hat Kurse oder eine dauerhafte Kürzel-Zuordnung
         $lehrkraefteMoodle = $db->query(
-            "SELECT b.id, b.vorname, b.nachname, b.kuerzel
+            "SELECT b.id, b.vorname, b.nachname, b.kuerzel, b.extern,
+                    (EXISTS (SELECT 1 FROM kurse k WHERE k.lehrer_id = b.id)
+                     OR EXISTS (SELECT 1 FROM lehrer_zuordnungen z WHERE z.benutzer_id = b.id)) AS vergeben
              FROM benutzer b
-             WHERE EXISTS (
-                     SELECT 1 FROM rollen r WHERE r.benutzer_id = b.id AND r.rolle = 'lehrkraft'
-                   )
-               AND NOT EXISTS (
-                     SELECT 1 FROM kurse k WHERE k.lehrer_id = b.id
-                   )
+             WHERE EXISTS (SELECT 1 FROM rollen r WHERE r.benutzer_id = b.id AND r.rolle = 'lehrkraft')
              ORDER BY b.nachname, b.vorname"
         )->fetchAll();
 
+        // Bereits zugeordnete Kürzel …
+        $lehrkraefteZugeordnet = $db->query(
+            "SELECT k.lehrer_kuerzel,
+                    k.lehrer_id,
+                    b.vorname, b.nachname, b.kuerzel, b.extern,
+                    COUNT(DISTINCT k.id)                AS anzahl_kurse,
+                    MAX(z.lehrer_kuerzel IS NOT NULL)   AS manuell
+             FROM kurse k
+             JOIN benutzer b ON b.id = k.lehrer_id
+             LEFT JOIN lehrer_zuordnungen z ON z.lehrer_kuerzel = k.lehrer_kuerzel
+             WHERE k.lehrer_kuerzel IS NOT NULL AND k.lehrer_id IS NOT NULL
+             GROUP BY k.lehrer_kuerzel, k.lehrer_id, b.vorname, b.nachname, b.kuerzel, b.extern"
+        )->fetchAll();
+
+        // … und gespeicherte Kürzel-Zuordnungen ohne aktuelle Kurse
+        $lehrkraefteGespeichert = $db->query(
+            "SELECT z.lehrer_kuerzel,
+                    z.benutzer_id AS lehrer_id,
+                    b.vorname, b.nachname, b.kuerzel, b.extern,
+                    0 AS anzahl_kurse, 1 AS manuell
+             FROM lehrer_zuordnungen z
+             JOIN benutzer b ON b.id = z.benutzer_id
+             WHERE NOT EXISTS (SELECT 1 FROM kurse k WHERE k.lehrer_kuerzel = z.lehrer_kuerzel)"
+        )->fetchAll();
+
+        $lehrkraefteZugeordnet = array_merge($lehrkraefteZugeordnet, $lehrkraefteGespeichert);
+        usort($lehrkraefteZugeordnet, static fn (array $x, array $y): int
+            => strnatcasecmp($x['lehrer_kuerzel'], $y['lehrer_kuerzel']));
+
         return [
-            'schueler_gomst'     => $schuelerGomst,
-            'schueler_moodle'    => $schuelerMoodle,
-            'lehrkraefte_kurse'  => $lehrkraefteKurse,
-            'lehrkraefte_moodle' => $lehrkraefteMoodle,
+            'schueler_gomst'         => $schuelerGomst,
+            'schueler_moodle'        => $schuelerMoodle,
+            'schueler_zugeordnet'    => $schuelerZugeordnet,
+            'lehrkraefte_kurse'      => $lehrkraefteKurse,
+            'lehrkraefte_moodle'     => $lehrkraefteMoodle,
+            'lehrkraefte_zugeordnet' => $lehrkraefteZugeordnet,
+            'externe_lehrkraefte'    => self::externeLehrkraefte($db),
         ];
+    }
+
+    /**
+     * Alle Moodle-Konten ohne Lehrkraft-Rolle (für das Korrigieren einer Zuordnung).
+     * `vergeben` = bereits einem GoMST-Namen zugeordnet.
+     */
+    public static function getMoodleSchueler(): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        return $db->query(
+            "SELECT b.id, b.vorname, b.nachname, b.stufe,
+                    (EXISTS (SELECT 1 FROM kurs_schueler ks WHERE ks.schueler_id = b.id)
+                     OR EXISTS (SELECT 1 FROM schueler_zuordnungen z WHERE z.benutzer_id = b.id)) AS vergeben
+             FROM benutzer b
+             WHERE NOT EXISTS (SELECT 1 FROM rollen r WHERE r.benutzer_id = b.id AND r.rolle = 'lehrkraft')
+             ORDER BY b.nachname, b.vorname"
+        )->fetchAll();
     }
 
     // ------------------------------------------------------------------
@@ -122,7 +315,8 @@ class StufenleitungApi
     // ------------------------------------------------------------------
 
     /**
-     * Speichert eine manuelle Zuordnung – immer personenbezogen, nicht kursbezogen.
+     * Speichert eine manuelle Zuordnung – dauerhaft und personenbezogen, nicht kursbezogen.
+     * Die Zuordnung überlebt das Löschen von Kursen und wird bei jedem Import wieder angewendet.
      *
      * Body für Schüler*innen:
      *   { "typ": "schueler", "name_roh": "Mustermann|Max", "benutzer_id": 17 }
@@ -131,6 +325,9 @@ class StufenleitungApi
      * Body für Lehrkräfte:
      *   { "typ": "lehrkraft", "lehrer_kuerzel": "SZ", "benutzer_id": 23 }
      *   Aktualisiert ALLE Kurse mit diesem lehrer_kuerzel.
+     *
+     * benutzer_id = null hebt die Zuordnung auf; es wird dann auch nicht mehr automatisch
+     * zugeordnet, bis eine neue Zuordnung gespeichert wird.
      */
     public static function postZuordnung(array $body): array
     {
@@ -138,42 +335,177 @@ class StufenleitungApi
         $db  = Database::getInstance();
         $typ = $body['typ'] ?? '';
 
-        if ($typ === 'schueler') {
-            $nameRoh    = $body['name_roh'] ?? '';
-            $benutzerId = isset($body['benutzer_id']) && $body['benutzer_id'] !== null
-                ? (int) $body['benutzer_id']
-                : null;
+        $benutzerId = isset($body['benutzer_id']) && $body['benutzer_id'] !== null
+            ? (int) $body['benutzer_id']
+            : null;
 
+        if ($typ !== 'schueler' && $typ !== 'lehrkraft') {
+            http_response_code(400);
+            throw new RuntimeException("Unbekannter Typ '$typ'. Erwartet: 'schueler' oder 'lehrkraft'.");
+        }
+
+        if ($benutzerId !== null) {
+            $stmt = $db->prepare('SELECT 1 FROM benutzer WHERE id = ?');
+            $stmt->execute([$benutzerId]);
+            if ($stmt->fetchColumn() === false) {
+                http_response_code(404);
+                throw new RuntimeException("Benutzer*in $benutzerId nicht gefunden.");
+            }
+        }
+
+        $vonId = Session::getBenutzerId();
+
+        if ($typ === 'schueler') {
+            $nameRoh = trim((string) ($body['name_roh'] ?? ''));
             if ($nameRoh === '') {
                 http_response_code(400);
                 throw new RuntimeException('name_roh fehlt.');
             }
 
-            $stmt = $db->prepare('UPDATE kurs_schueler SET schueler_id = ? WHERE name_roh = ?');
-            $stmt->execute([$benutzerId, $nameRoh]);
-
-            return ['ok' => true, 'aktualisiert' => $stmt->rowCount()];
+            return [
+                'ok'           => true,
+                'aktualisiert' => Zuordnung::speichereSchuelerZuordnung($db, $nameRoh, $benutzerId, $vonId),
+            ];
         }
 
-        if ($typ === 'lehrkraft') {
-            $lehrerKuerzel = $body['lehrer_kuerzel'] ?? '';
-            $benutzerId    = isset($body['benutzer_id']) && $body['benutzer_id'] !== null
-                ? (int) $body['benutzer_id']
-                : null;
-
-            if ($lehrerKuerzel === '') {
-                http_response_code(400);
-                throw new RuntimeException('lehrer_kuerzel fehlt.');
-            }
-
-            $stmt = $db->prepare('UPDATE kurse SET lehrer_id = ? WHERE lehrer_kuerzel = ?');
-            $stmt->execute([$benutzerId, $lehrerKuerzel]);
-
-            return ['ok' => true, 'aktualisiert' => $stmt->rowCount()];
+        $lehrerKuerzel = trim((string) ($body['lehrer_kuerzel'] ?? ''));
+        if ($lehrerKuerzel === '') {
+            http_response_code(400);
+            throw new RuntimeException('lehrer_kuerzel fehlt.');
         }
 
-        http_response_code(400);
-        throw new RuntimeException("Unbekannter Typ '$typ'. Erwartet: 'schueler' oder 'lehrkraft'.");
+        return [
+            'ok'           => true,
+            'aktualisiert' => Zuordnung::speichereLehrerZuordnung($db, $lehrerKuerzel, $benutzerId, $vonId),
+        ];
+    }
+
+    // ------------------------------------------------------------------
+    // Externe Lehrkräfte (ohne Moodle-Konto)
+    // ------------------------------------------------------------------
+
+    /** @return list<array<string, mixed>> */
+    private static function externeLehrkraefte(\PDO $db): array
+    {
+        return $db->query(
+            "SELECT b.id, b.vorname, b.nachname, b.kuerzel, b.email,
+                    (SELECT COUNT(*) FROM kurse k WHERE k.lehrer_id = b.id) AS anzahl_kurse
+             FROM benutzer b
+             WHERE b.extern = 1
+             ORDER BY b.nachname, b.vorname"
+        )->fetchAll();
+    }
+
+    /**
+     * Legt eine externe Lehrkraft an (kein Moodle-Konto, z.B. weil die Klausur an einer
+     * anderen Schule geschrieben wird). Sie erhält die Anwesenheits-Mails samt Token-Links,
+     * kann sich aber nicht anmelden. Kurse mit diesem Kürzel werden ihr sofort zugeordnet.
+     *
+     * Body: { vorname, nachname, kuerzel, email }
+     */
+    public static function addExterneLehrkraft(array $body): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        [$vorname, $nachname, $email] = self::validiereExterneLehrkraft($body);
+
+        $kuerzel = trim((string) ($body['kuerzel'] ?? ''));
+        if ($kuerzel === '' || mb_strlen($kuerzel) > 20) {
+            http_response_code(400);
+            throw new RuntimeException('Kürzel ist erforderlich (max. 20 Zeichen).');
+        }
+
+        $stmt = $db->prepare('SELECT 1 FROM benutzer WHERE UPPER(kuerzel) = UPPER(?) LIMIT 1');
+        $stmt->execute([$kuerzel]);
+        if ($stmt->fetchColumn() !== false) {
+            http_response_code(409);
+            throw new RuntimeException("Das Kürzel „{$kuerzel}“ wird bereits von einer anderen Person verwendet.");
+        }
+
+        // Platzhalter-moodle_id: kann nie mit einer echten Moodle-ID (numerisch) kollidieren
+        $db->prepare(
+            'INSERT INTO benutzer (moodle_id, vorname, nachname, email, kuerzel, extern)
+             VALUES (?, ?, ?, ?, ?, 1)'
+        )->execute(['extern:' . bin2hex(random_bytes(8)), $vorname, $nachname, $email, $kuerzel]);
+        $id = (int) $db->lastInsertId();
+
+        $db->prepare('INSERT INTO rollen (benutzer_id, rolle) VALUES (?, ?)')->execute([$id, 'lehrkraft']);
+
+        // Kurse mit diesem Kürzel zuordnen – außer, es gibt bereits eine dauerhafte Zuordnung
+        // auf eine andere Person (die wird nicht stillschweigend überschrieben).
+        $stmt = $db->prepare('SELECT 1 FROM lehrer_zuordnungen WHERE lehrer_kuerzel = ? AND benutzer_id IS NOT NULL');
+        $stmt->execute([$kuerzel]);
+        $zugeordnet = 0;
+        if ($stmt->fetchColumn() === false) {
+            $zugeordnet = Zuordnung::speichereLehrerZuordnung($db, $kuerzel, $id, Session::getBenutzerId());
+        }
+
+        return ['id' => $id, 'zugeordnete_kurse' => $zugeordnet];
+    }
+
+    /**
+     * Ändert Name und E-Mail einer externen Lehrkraft. Das Kürzel bleibt unverändert
+     * (die Zuordnung der Kurse hängt daran) – bei Bedarf löschen und neu anlegen.
+     *
+     * Body: { vorname, nachname, email }
+     */
+    public static function updateExterneLehrkraft(int $id, array $body): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('SELECT 1 FROM benutzer WHERE id = ? AND extern = 1');
+        $stmt->execute([$id]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Externe Lehrkraft $id nicht gefunden.");
+        }
+
+        [$vorname, $nachname, $email] = self::validiereExterneLehrkraft($body);
+
+        $db->prepare('UPDATE benutzer SET vorname = ?, nachname = ?, email = ? WHERE id = ?')
+           ->execute([$vorname, $nachname, $email, $id]);
+
+        return ['ok' => true];
+    }
+
+    /**
+     * Löscht eine externe Lehrkraft. Ihre Kurse bleiben erhalten, haben danach aber
+     * keine Lehrkraft mehr (und bereits versandte Anwesenheits-Links werden ungültig).
+     */
+    public static function deleteExterneLehrkraft(int $id): array
+    {
+        Session::requireRolle('admin', 'stufenleitung');
+        $db = Database::getInstance();
+
+        $stmt = $db->prepare('DELETE FROM benutzer WHERE id = ? AND extern = 1');
+        $stmt->execute([$id]);
+        if ($stmt->rowCount() === 0) {
+            http_response_code(404);
+            throw new RuntimeException("Externe Lehrkraft $id nicht gefunden.");
+        }
+
+        return ['ok' => true];
+    }
+
+    /** @return array{0: string, 1: string, 2: string} [vorname, nachname, email] */
+    private static function validiereExterneLehrkraft(array $body): array
+    {
+        $vorname  = trim((string) ($body['vorname']  ?? ''));
+        $nachname = trim((string) ($body['nachname'] ?? ''));
+        $email    = trim((string) ($body['email']    ?? ''));
+
+        if ($vorname === '' || $nachname === '' || mb_strlen($vorname) > 100 || mb_strlen($nachname) > 100) {
+            http_response_code(400);
+            throw new RuntimeException('Vor- und Nachname sind erforderlich (max. 100 Zeichen).');
+        }
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 255) {
+            http_response_code(400);
+            throw new RuntimeException('Bitte eine gültige E-Mail-Adresse angeben.');
+        }
+
+        return [$vorname, $nachname, $email];
     }
 
     // ------------------------------------------------------------------
@@ -389,7 +721,7 @@ class StufenleitungApi
         $db = Database::getInstance();
 
         return $db->query(
-            "SELECT b.id, b.vorname, b.nachname, b.kuerzel
+            "SELECT b.id, b.vorname, b.nachname, b.kuerzel, b.extern
              FROM benutzer b
              JOIN rollen r ON r.benutzer_id = b.id AND r.rolle = 'lehrkraft'
              ORDER BY b.nachname, b.vorname"
@@ -528,64 +860,14 @@ class StufenleitungApi
 
         $ksId = (int) $db->lastInsertId();
 
-        // Automatisches Namensmatching (wie GoMST-Import)
-        $schuelerId = self::versucheNamensmatching($db, $name);
+        // Gespeicherte Zuordnung bzw. automatisches Namensmatching (wie GoMST-Import)
+        $schuelerId = Zuordnung::ermittleSchuelerId($db, $name);
         if ($schuelerId !== null) {
             $db->prepare('UPDATE kurs_schueler SET schueler_id = ? WHERE id = ?')
                ->execute([$schuelerId, $ksId]);
         }
 
         return ['kurs_schueler_id' => $ksId, 'name_roh' => $name, 'schueler_id' => $schuelerId];
-    }
-
-    /**
-     * Parst einen Anzeigenamen in (nachname, vorname).
-     * Formate: "Nachname|Vorname", "Nachname, Vorname", "Vorname Nachname"
-     *
-     * @return array{0: string, 1: string}
-     */
-    private static function parseNameZusatz(string $name): array
-    {
-        if (str_contains($name, '|')) {
-            [$n, $v] = array_pad(explode('|', $name, 2), 2, '');
-            return [trim($n), trim($v)];
-        }
-        if (str_contains($name, ',')) {
-            $i = strpos($name, ',');
-            return [trim(substr($name, 0, $i)), trim(substr($name, $i + 1))];
-        }
-        $j = strpos(trim($name), ' ');
-        if ($j !== false) {
-            $parts = trim($name);
-            return [trim(substr($parts, $j + 1)), trim(substr($parts, 0, $j))];
-        }
-        return [trim($name), ''];
-    }
-
-    /**
-     * Sucht einen passenden Benutzer anhand des Namens.
-     * Unterstützt GoMST-Format (Nachname|Vorname), Komma- und Leerzeichen-Trennung.
-     */
-    private static function versucheNamensmatching(\PDO $db, string $nameRoh): ?int
-    {
-        [$nachname, $vorname] = self::parseNameZusatz($nameRoh);
-        if ($nachname === '' && $vorname === '') {
-            return null;
-        }
-
-        $erstVorname = strtok($vorname, ' ') ?: $vorname;
-
-        $stmt = $db->prepare(
-            'SELECT id FROM benutzer
-             WHERE LOWER(TRIM(nachname)) = LOWER(?)
-               AND (LOWER(TRIM(vorname)) = LOWER(?)
-                    OR LOWER(TRIM(SUBSTRING_INDEX(vorname, \' \', 1))) = LOWER(?))
-             ORDER BY CASE WHEN LOWER(TRIM(vorname)) = LOWER(?) THEN 0 ELSE 1 END
-             LIMIT 1'
-        );
-        $stmt->execute([$nachname, $vorname, $erstVorname, $vorname]);
-        $id = $stmt->fetchColumn();
-        return $id !== false ? (int) $id : null;
     }
 
     /**
@@ -696,6 +978,7 @@ class StufenleitungApi
                     k.lehrer_id,
                     b.vorname      AS lehrer_vorname,
                     b.nachname     AS lehrer_nachname,
+                    b.extern       AS lehrer_extern,
                     COUNT(ks.id)   AS schueler_gesamt,
                     SUM(CASE WHEN ks.schueler_id IS NOT NULL THEN 1 ELSE 0 END) AS schueler_zugeordnet
              FROM kurse k
@@ -763,33 +1046,29 @@ class StufenleitungApi
         }
 
         // Lehrkraft auflösen: direkte ID hat Vorrang vor Kürzel
-        $lehrerId       = null;
+        $lehrerId = null;
+        if ($lehrerIdDirekt !== null) {
+            $lehrerId = $lehrerIdDirekt;
+        } elseif ($lehrerKuerzel !== null) {
+            $lehrerId = Zuordnung::ermittleLehrerId($db, $lehrerKuerzel);
+        }
+
         $lehrerVorname  = null;
         $lehrerNachname = null;
-        if ($lehrerIdDirekt !== null) {
-            $ls = $db->prepare('SELECT id, vorname, nachname, kuerzel FROM benutzer WHERE id = ?');
-            $ls->execute([$lehrerIdDirekt]);
+        $lehrerExtern   = 0;
+        if ($lehrerId !== null) {
+            $ls = $db->prepare('SELECT id, vorname, nachname, kuerzel, extern FROM benutzer WHERE id = ?');
+            $ls->execute([$lehrerId]);
             $lehrer = $ls->fetch();
             if ($lehrer !== false) {
-                $lehrerId       = (int) $lehrer['id'];
                 $lehrerVorname  = $lehrer['vorname'];
                 $lehrerNachname = $lehrer['nachname'];
-                $lehrerKuerzel  = $lehrer['kuerzel'] ?? $lehrerKuerzel;
-            }
-        } elseif ($lehrerKuerzel !== null) {
-            $ls = $db->prepare(
-                'SELECT b.id, b.vorname, b.nachname
-                 FROM benutzer b
-                 JOIN rollen r ON r.benutzer_id = b.id AND r.rolle = \'lehrkraft\'
-                 WHERE UPPER(b.kuerzel) = ?
-                 LIMIT 1'
-            );
-            $ls->execute([$lehrerKuerzel]);
-            $lehrer = $ls->fetch();
-            if ($lehrer !== false) {
-                $lehrerId       = (int) $lehrer['id'];
-                $lehrerVorname  = $lehrer['vorname'];
-                $lehrerNachname = $lehrer['nachname'];
+                $lehrerExtern   = (int) $lehrer['extern'];
+                if ($lehrerIdDirekt !== null) {
+                    $lehrerKuerzel = $lehrer['kuerzel'] ?? $lehrerKuerzel;
+                }
+            } else {
+                $lehrerId = null;
             }
         }
 
@@ -808,6 +1087,7 @@ class StufenleitungApi
             'lehrer_id'           => $lehrerId,
             'lehrer_vorname'      => $lehrerVorname,
             'lehrer_nachname'     => $lehrerNachname,
+            'lehrer_extern'       => $lehrerExtern,
             'schueler_gesamt'     => 0,
             'schueler_zugeordnet' => 0,
         ];

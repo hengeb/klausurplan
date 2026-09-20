@@ -44,6 +44,52 @@ class EmailTemplates
         );
     }
 
+    /**
+     * Übersicht für die Stufenleitung: Klausuren der eigenen Stufe(n), bei denen
+     * einige Tage nach dem Termin noch keine Anwesenheit eingetragen wurde.
+     *
+     * @param list<array{stufe: string, schuljahr: string, kurs_anzeigename: string,
+     *                   klausur_nr: int|string, termin_datum: ?string, lehrkraft: ?string}> $klausuren
+     */
+    public static function stufenleitungUebersicht(array $klausuren): string
+    {
+        $nachStufe = [];
+        foreach ($klausuren as $k) {
+            $nachStufe["{$k['stufe']} ({$k['schuljahr']})"][] = $k;
+        }
+
+        $tabellen = '';
+        foreach ($nachStufe as $stufe => $zeilen) {
+            $tr = '';
+            foreach ($zeilen as $k) {
+                $nr = (int) $k['klausur_nr'] > 1 ? ' (Nr. ' . (int) $k['klausur_nr'] . ')' : '';
+                $tr .= '<tr>'
+                    . '<td style="padding:.3rem .6rem;border-bottom:1px solid #eee">' . htmlspecialchars($k['kurs_anzeigename'] . $nr) . '</td>'
+                    . '<td style="padding:.3rem .6rem;border-bottom:1px solid #eee">' . self::formatDatum($k['termin_datum'] ?? null) . '</td>'
+                    . '<td style="padding:.3rem .6rem;border-bottom:1px solid #eee">' . htmlspecialchars($k['lehrkraft'] ?? '–') . '</td>'
+                    . '</tr>';
+            }
+            $tabellen .= '<h3 style="margin:1.25rem 0 .4rem">' . htmlspecialchars($stufe) . '</h3>'
+                . '<table style="width:100%;border-collapse:collapse;font-size:.9rem">'
+                . '<thead><tr>'
+                . '<th style="text-align:left;padding:.3rem .6rem;border-bottom:2px solid #ddd">Kurs</th>'
+                . '<th style="text-align:left;padding:.3rem .6rem;border-bottom:2px solid #ddd">Datum</th>'
+                . '<th style="text-align:left;padding:.3rem .6rem;border-bottom:2px solid #ddd">Lehrkraft</th>'
+                . '</tr></thead><tbody>' . $tr . '</tbody></table>';
+        }
+
+        $appUrl = htmlspecialchars(rtrim($_ENV['APP_URL'] ?? '', '/'));
+
+        return self::layout(
+            'Anwesenheit noch nicht eingetragen',
+            '<p>Für die folgenden Klausuren Ihrer Stufe(n) wurde eine Woche nach dem Termin noch keine Anwesenheit eingetragen:</p>'
+            . $tabellen
+            . '<p style="margin-top:1.5rem">Die Anwesenheit können Sie im '
+            . ($appUrl !== '' ? '<a href="' . $appUrl . '">Klausurplan</a>' : 'Klausurplan')
+            . ' unter „Klausuren“ selbst erfassen.</p>'
+        );
+    }
+
     // ------------------------------------------------------------------
 
     private static function formatDatum(?string $datum): string

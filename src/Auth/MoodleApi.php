@@ -117,6 +117,7 @@ class MoodleApi
     /**
      * Löscht lokale Benutzer*innen, die nicht mehr in Moodle vorhanden sind
      * und an keiner Klausur mehr beteiligt sind (kurs_schueler.schueler_id, kurse.lehrer_id).
+     * Externe Lehrkräfte (extern = 1) haben kein Moodle-Konto und bleiben unberührt.
      */
     private function loescheVeraltet(\PDO $db, array $geseheneMoodleIds): int
     {
@@ -129,6 +130,7 @@ class MoodleApi
         $stmt = $db->prepare(
             "DELETE FROM benutzer
              WHERE moodle_id NOT IN ($platzhalter)
+               AND extern = 0
                AND id NOT IN (SELECT schueler_id FROM kurs_schueler WHERE schueler_id IS NOT NULL)
                AND id NOT IN (SELECT lehrer_id   FROM kurse           WHERE lehrer_id   IS NOT NULL)"
         );
@@ -145,7 +147,7 @@ class MoodleApi
     {
         $stmt = $db->query(
             'SELECT kuerzel FROM benutzer
-             WHERE kuerzel IS NOT NULL
+             WHERE kuerzel IS NOT NULL AND extern = 0
              GROUP BY kuerzel HAVING COUNT(*) > 1'
         );
 
@@ -153,7 +155,7 @@ class MoodleApi
             // Alle Einträge mit diesem Kürzel, neuester zuerst (größte numerische Moodle-ID)
             $dup = $db->prepare(
                 'SELECT id FROM benutzer
-                 WHERE kuerzel = ?
+                 WHERE kuerzel = ? AND extern = 0
                  ORDER BY CAST(moodle_id AS UNSIGNED) DESC'
             );
             $dup->execute([$kuerzel]);

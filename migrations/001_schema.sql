@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS benutzer (
     email           VARCHAR(255),
     kuerzel         VARCHAR(20),
     stufe           VARCHAR(20) DEFAULT NULL,
+    -- extern = 1: Lehrkraft ohne Moodle-Konto (moodle_id ist dann ein Platzhalter "extern:…")
+    extern          TINYINT(1)  NOT NULL DEFAULT 0,
     zuletzt_gesehen DATETIME,
     erstellt_am     DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -160,6 +162,38 @@ CREATE TABLE IF NOT EXISTS email_benachrichtigungen (
 CREATE TABLE IF NOT EXISTS fach_bezeichnungen (
     kuerzel     VARCHAR(10) PRIMARY KEY,
     bezeichnung VARCHAR(100) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Dauerhafte Zuordnung GoMST-Name → Moodle-Konto. Unabhängig von Kursen/Halbjahren,
+-- damit sie ein Löschen und erneutes Importieren überlebt.
+-- benutzer_id NULL = bewusst ohne Zuordnung (verhindert das automatische Matching).
+CREATE TABLE IF NOT EXISTS schueler_zuordnungen (
+    name_roh      VARCHAR(200) NOT NULL PRIMARY KEY,
+    benutzer_id   INT DEFAULT NULL,
+    geaendert_von INT DEFAULT NULL,
+    geaendert_am  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (benutzer_id)   REFERENCES benutzer(id) ON DELETE CASCADE,
+    FOREIGN KEY (geaendert_von) REFERENCES benutzer(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Dauerhafte Zuordnung GoMST-Lehrerkürzel → Lehrkraft (Moodle-Konto oder externe Lehrkraft)
+CREATE TABLE IF NOT EXISTS lehrer_zuordnungen (
+    lehrer_kuerzel VARCHAR(20) NOT NULL PRIMARY KEY,
+    benutzer_id    INT DEFAULT NULL,
+    geaendert_von  INT DEFAULT NULL,
+    geaendert_am   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (benutzer_id)   REFERENCES benutzer(id) ON DELETE CASCADE,
+    FOREIGN KEY (geaendert_von) REFERENCES benutzer(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Übersichtsmails an die Stufenleitung: pro Klausur und Person nur einmal
+CREATE TABLE IF NOT EXISTS stufenleitung_erinnerungen (
+    klausur_id  INT NOT NULL,
+    benutzer_id INT NOT NULL,
+    gesendet_am DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (klausur_id, benutzer_id),
+    FOREIGN KEY (klausur_id)  REFERENCES klausuren(id) ON DELETE CASCADE,
+    FOREIGN KEY (benutzer_id) REFERENCES benutzer(id)  ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------

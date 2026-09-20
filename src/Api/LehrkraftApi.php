@@ -17,7 +17,10 @@ class LehrkraftApi
 
     /**
      * Gibt Klausuren zurück.
-     * Admin/Stufenleitung: alle. Lehrkraft: nur eigene Kurse.
+     * - Stufenleitung: Klausuren der eigenen Stufen (+ eigene Kurse als Lehrkraft);
+     *   mit ?alle=1 die aller Stufen. Ohne Stufenzuordnung bleiben nur die eigenen Kurse.
+     * - Admin ohne Stufenleitung-Rolle: alle.
+     * - Lehrkraft: nur eigene Kurse.
      * Optionaler Query-Parameter: ?halbjahr_id=X
      */
     public static function getKlausuren(): array
@@ -42,7 +45,9 @@ class LehrkraftApi
             $params[] = $halbjahrId;
         }
 
-        if ($istAdmin) {
+        $alleStufen = ($istAdmin || $istSL) && ($_GET['alle'] ?? '') === '1';
+
+        if ($alleStufen || ($istAdmin && !$istSL)) {
             // kein Zugriffsfilter
         } elseif ($istSL) {
             // Eigene Stufen + eigene Kurse als Lehrkraft
@@ -76,6 +81,7 @@ class LehrkraftApi
                     lb.vorname        AS lehrer_vorname,
                     lb.nachname       AS lehrer_nachname,
                     lb.kuerzel        AS lehrer_kuerzel,
+                    lb.extern         AS lehrer_extern,
                     (SELECT COUNT(*) FROM kurs_schueler ks WHERE ks.kurs_id = kurs.id) AS schueler_anzahl,
                     (SELECT COUNT(*) FROM anwesenheiten a
                      WHERE a.klausur_id = k.id AND a.status != 'ausstehend')          AS anwesenheit_erfasst,
@@ -225,6 +231,10 @@ class LehrkraftApi
     /**
      * Verarbeitet geparste Excel-Paste-Daten.
      *
+     * Mit $halbjahrId werden die Kurse ausschließlich in diesem Halbjahr gesucht
+     * (das Kurskürzel ist nur je Halbjahr eindeutig). Ohne Angabe wird das aktuelle
+     * Halbjahr bevorzugt, mit Rückfall auf das neueste Halbjahr mit diesem Kürzel.
+     *
      * Matching-Priorität je Kurs:
      * 1. Gleicher Kurs, gleiches Datum → Uhrzeit/Dauer aktualisieren
      * 2. Gleicher Kurs, kein Datum → Datum + alle Felder setzen
@@ -232,7 +242,7 @@ class LehrkraftApi
      *
      * @return array{ erstellt: int, aktualisiert: int, fehler: array[] }
      */
-    public static function postPasteImport(array $zeilen): array
+    public static function postPasteImport(array $zeilen, ?int $halbjahrId = null): array
     {
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
@@ -241,12 +251,18 @@ class LehrkraftApi
         $fehler   = $ergebnis['fehler'];
         $erstellt = $aktualisiert = 0;
 
-        $benutzer  = Session::getBenutzer();
-        $halbjahrIds = self::aktuelleHalbjahrIds($db);
+        $benutzer = Session::getBenutzer();
+        $strikt   = $halbjahrId !== null;
+
+        if ($strikt) {
+            self::pruefeHalbjahrExistiert($db, $halbjahrId);
+            $halbjahrIds = [$halbjahrId];
+        } else {
+            $halbjahrIds = self::aktuelleHalbjahrIds($db);
+        }
 
         foreach ($ergebnis['zeilen'] as $i => $z) {
-            // Kurs aus dem aktuellen Halbjahr suchen
-            $kursId = self::kursIdFuerKuerzel($db, $z['kurs_kuerzel'], $halbjahrIds);
+            $kursId = self::kursIdFuerKuerzel($db, $z['kurs_kuerzel'], $halbjahrIds, $strikt);
 
             if ($kursId === null) {
                 $fehler[] = ['zeile' => $i + 1, 'meldung' => 'Kurs "' . $z['kurs_kuerzel'] . '" nicht gefunden.'];
@@ -302,9 +318,9 @@ class LehrkraftApi
     // ------------------------------------------------------------------
 
     /**
-     * Kurse für das Direktanlage-Formular.
-     * Admin: aktuelles (neuestes) Halbjahr.
-     * Stufenleitung: alle Kurse aus eigenen Stufen, neueste zuerst.
+     * Kurse für das Direktanlage-Formular und die Halbjahres-Auswahl beim Excel-Import.
+     * Admin und Stufenleitung dürfen für alle Stufen Klausuren anlegen; `ist_eigene_sl`
+     * markiert die Stufen, für die die angemeldete Person zuständig ist (Vorauswahl).
      */
     public static function getKurse(): array
     {
@@ -312,51 +328,51 @@ class LehrkraftApi
         $db       = Database::getInstance();
         $benutzer = Session::getBenutzer();
 
-        // Kurse aus eigenen Stufen (SL-Filter), neueste zuerst
         $stmt = $db->prepare(
             "SELECT k.id, k.kurs_kuerzel, k.anzeigename, k.kursart,
-                    s.name AS stufe, s.schuljahr, h.abschnitt, h.id AS halbjahr_id
+                    s.id AS stufe_id, s.name AS stufe, s.schuljahr,
+                    h.abschnitt, h.id AS halbjahr_id,
+                    EXISTS (SELECT 1 FROM stufenleitungen sl
+                            WHERE sl.stufe_id = s.id AND sl.benutzer_id = ?) AS ist_eigene_sl
              FROM kurse k
              JOIN halbjahre h ON h.id = k.halbjahr_id
              JOIN stufen s    ON s.id = h.stufe_id
-             JOIN stufenleitungen sl ON sl.stufe_id = s.id AND sl.benutzer_id = ?
              ORDER BY s.schuljahr DESC, h.abschnitt DESC, s.name, k.anzeigename"
         );
         $stmt->execute([$benutzer['id']]);
-        $kurse = $stmt->fetchAll();
 
-        // Admin ohne SL-Zuordnung: Fallback auf aktuelles Halbjahr
-        if (empty($kurse) && in_array('admin', $benutzer['rollen'] ?? [], true)) {
-            $halbjahrIds = self::aktuelleHalbjahrIds($db);
-            if (empty($halbjahrIds)) {
-                return [];
-            }
-            $platzhalter = implode(',', array_fill(0, count($halbjahrIds), '?'));
-            $stmt = $db->prepare(
-                "SELECT k.id, k.kurs_kuerzel, k.anzeigename, k.kursart,
-                        s.name AS stufe, s.schuljahr, h.abschnitt, h.id AS halbjahr_id
-                 FROM kurse k
-                 JOIN halbjahre h ON h.id = k.halbjahr_id
-                 JOIN stufen s    ON s.id = h.stufe_id
-                 WHERE k.halbjahr_id IN ($platzhalter)
-                 ORDER BY s.schuljahr DESC, h.abschnitt DESC, s.name, k.anzeigename"
-            );
-            $stmt->execute($halbjahrIds);
-            return $stmt->fetchAll();
-        }
-
-        return $kurse;
+        return $stmt->fetchAll();
     }
 
     /**
-     * Generiert eine CSV-Vorlage mit allen Kursen des aktuellen Halbjahres
-     * und sendet sie als Datei-Download. Endet mit exit().
+     * Generiert eine CSV-Vorlage mit allen Kursen eines Halbjahres (?halbjahr_id=X)
+     * und sendet sie als Datei-Download. Ohne Angabe: das aktuelle Halbjahr. Endet mit exit().
      */
     public static function downloadVorlage(): never
     {
         Session::requireRolle('admin', 'stufenleitung');
-        $db          = Database::getInstance();
-        $halbjahrIds = self::aktuelleHalbjahrIds($db);
+        $db = Database::getInstance();
+
+        $halbjahrId = isset($_GET['halbjahr_id']) ? (int) $_GET['halbjahr_id'] : 0;
+        $dateiname  = 'klausur-vorlage';
+
+        if ($halbjahrId > 0) {
+            $stmt = $db->prepare(
+                'SELECT s.name, s.schuljahr, h.abschnitt
+                 FROM halbjahre h JOIN stufen s ON s.id = h.stufe_id
+                 WHERE h.id = ?'
+            );
+            $stmt->execute([$halbjahrId]);
+            $hj = $stmt->fetch();
+            if ($hj === false) {
+                http_response_code(404);
+                throw new RuntimeException("Halbjahr $halbjahrId nicht gefunden.");
+            }
+            $halbjahrIds = [$halbjahrId];
+            $dateiname  .= '-' . preg_replace('/[^A-Za-z0-9]+/', '-', "{$hj['name']}-{$hj['schuljahr']}-HJ{$hj['abschnitt']}");
+        } else {
+            $halbjahrIds = self::aktuelleHalbjahrIds($db);
+        }
 
         $kurse = [];
         if (!empty($halbjahrIds)) {
@@ -373,17 +389,18 @@ class LehrkraftApi
         }
 
         header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename="klausur-vorlage.csv"');
+        header('Content-Disposition: attachment; filename="' . $dateiname . '.csv"');
         header('Cache-Control: no-cache, no-store');
         header('Content-Security-Policy: default-src \'none\'');
 
         $out = fopen('php://output', 'w');
         fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM für Excel
 
-        fputcsv($out, ['Kurs', 'Anzeigename', 'TN', 'Datum', 'Uhrzeit', 'Dauer'], ';');
+        // escape-Parameter explizit leer: Standardwert ist ab PHP 8.4 veraltet (Deprecated-Meldung würde die CSV verunreinigen)
+        fputcsv($out, ['Kurs', 'Anzeigename', 'TN', 'Datum', 'Uhrzeit', 'Dauer'], ';', '"', '');
 
         foreach ($kurse as $k) {
-            fputcsv($out, [$k['kurs_kuerzel'], $k['anzeigename'], $k['anzahl'], '', '', ''], ';');
+            fputcsv($out, [$k['kurs_kuerzel'], $k['anzeigename'], $k['anzahl'], '', '', ''], ';', '"', '');
         }
 
         fclose($out);
@@ -644,16 +661,23 @@ class LehrkraftApi
     // ------------------------------------------------------------------
 
     /**
-     * Gibt die IDs aller Halbjahre des neuesten Schuljahres und Abschnitts zurück.
+     * Gibt die IDs aller Halbjahre des neuesten Schuljahres und Abschnitts zurück,
+     * zu denen tatsächlich Kurse existieren (leere, z.B. nur angelegte Halbjahre zählen nicht).
      * "Neuestes" = höchstes Schuljahr (lexikografisch), darin höchster Abschnitt.
      */
     private static function aktuelleHalbjahrIds(\PDO $db): array
     {
+        $mitKursen = 'EXISTS (SELECT 1 FROM kurse k WHERE k.halbjahr_id = h.id)';
+
         $row = $db->query(
             "SELECT s.schuljahr, MAX(h.abschnitt) AS abschnitt
              FROM halbjahre h
              JOIN stufen s ON s.id = h.stufe_id
-             WHERE s.schuljahr = (SELECT MAX(schuljahr) FROM stufen)
+             WHERE $mitKursen
+               AND s.schuljahr = (SELECT MAX(s2.schuljahr)
+                                  FROM stufen s2
+                                  JOIN halbjahre h ON h.stufe_id = s2.id
+                                  WHERE $mitKursen)
              GROUP BY s.schuljahr"
         )->fetch();
 
@@ -670,11 +694,21 @@ class LehrkraftApi
         return array_column($stmt->fetchAll(), 'id');
     }
 
+    private static function pruefeHalbjahrExistiert(\PDO $db, int $halbjahrId): void
+    {
+        $stmt = $db->prepare('SELECT 1 FROM halbjahre WHERE id = ?');
+        $stmt->execute([$halbjahrId]);
+        if ($stmt->fetchColumn() === false) {
+            http_response_code(404);
+            throw new RuntimeException("Halbjahr $halbjahrId nicht gefunden.");
+        }
+    }
+
     /**
      * Sucht die Kurs-ID anhand des Kürzels, bevorzugt aus den angegebenen Halbjahren.
-     * Fallback auf neuestes verfügbares Halbjahr.
+     * Ohne $strikt Fallback auf das neueste verfügbare Halbjahr mit diesem Kürzel.
      */
-    private static function kursIdFuerKuerzel(\PDO $db, string $kuerzel, array $halbjahrIds): ?int
+    private static function kursIdFuerKuerzel(\PDO $db, string $kuerzel, array $halbjahrIds, bool $strikt = false): ?int
     {
         if (!empty($halbjahrIds)) {
             $platzhalter = implode(',', array_fill(0, count($halbjahrIds), '?'));
@@ -686,6 +720,10 @@ class LehrkraftApi
             if ($id !== false) {
                 return (int) $id;
             }
+        }
+
+        if ($strikt) {
+            return null;
         }
 
         // Fallback: neuestes Halbjahr generell
