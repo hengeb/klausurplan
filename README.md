@@ -150,6 +150,7 @@ mit Lehrkraft das ✉️ anklicken – die Mail sollte ankommen. Fehler des Cron
    |---|---|---|
    | `002_remove_raum.sql` | entfernt das Feld „Raum“ | nur **einmal** und nur, wenn `klausuren` noch die Spalte `raum` hat (Installationen aus einem alten Stand) |
    | `003_zuordnungen_extern.sql` | dauerhafte Zuordnungen, externe Lehrkräfte, Stufenleitungs-Mails | mehrfach ausführbar; übernimmt bestehende Zuordnungen |
+   | `004_verwaiste_stufen.sql` | löscht Stufen ohne Halbjahr (Altlasten in der Stufenauswahl) | mehrfach ausführbar |
 
    Jede neue Migration wird hier eingetragen. Notiere dir, welche Nummer bei dir zuletzt eingespielt wurde.
 4. **Prüfen:** Tool aus Moodle öffnen (Browser-Cache mit `Strg+F5` leeren, falls die Seite alt aussieht),

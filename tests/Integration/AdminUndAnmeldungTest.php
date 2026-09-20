@@ -49,6 +49,7 @@ final class AdminUndAnmeldungTest extends IntegrationTestCase
     {
         $p = $this->fx->benutzer('Sarah', 'Leitung', ['stufenleitung']);
         $stufe = $this->fx->stufe('Q2');
+        $this->fx->halbjahr($stufe);
         $this->fx->stufenleitung($p, $stufe);
 
         AdminApi::setRollen($p, ['lehrkraft', 'stufenleitung', 'unbekannt']);

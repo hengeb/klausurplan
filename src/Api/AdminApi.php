@@ -127,12 +127,14 @@ class AdminApi
     // Stufen & Stufenleitungen
     // ------------------------------------------------------------------
 
-    /** Alle Stufen (für Stufenleitungs-Zuweisung). */
+    /** Alle Stufen mit Halbjahren (für Stufenleitungs-Zuweisung). */
     public static function getStufen(): array
     {
         $db = Database::getInstance();
         return $db->query(
-            'SELECT id, name, schuljahr FROM stufen ORDER BY schuljahr DESC, name'
+            'SELECT s.id, s.name, s.schuljahr FROM stufen s
+             WHERE EXISTS (SELECT 1 FROM halbjahre h WHERE h.stufe_id = s.id)
+             ORDER BY s.schuljahr DESC, s.name'
         )->fetchAll();
     }
 

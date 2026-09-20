@@ -22,6 +22,8 @@ final class StufenleitungSelbstverwaltungTest extends IntegrationTestCase
         $this->sl = $this->fx->benutzer('Sarah', 'Leitung', ['stufenleitung', 'lehrkraft']);
         $this->q1 = $this->fx->stufe('Q1');
         $this->q2 = $this->fx->stufe('Q2');
+        $this->fx->halbjahr($this->q1);   // Stufen ohne Halbjahr gelten als verwaist
+        $this->fx->halbjahr($this->q2);
         $this->alsBenutzer($this->sl, ['stufenleitung', 'lehrkraft']);
     }
 
@@ -66,6 +68,61 @@ final class StufenleitungSelbstverwaltungTest extends IntegrationTestCase
         StufenleitungApi::meineStufeAbgeben($this->q1);
 
         $this->assertSame(1, $this->fx->zaehle('SELECT COUNT(*) FROM stufenleitungen WHERE benutzer_id = ?', [$andere]), 'fremde Zuständigkeit bleibt');
+    }
+
+    public function testVerwaisteStufenOhneHalbjahrErscheinenNichtUndSindNichtWaehlbar(): void
+    {
+        $verwaist = $this->fx->stufe('Q3', '2020/2021');
+
+        $ids = array_map(fn ($s) => (int) $s['id'], StufenleitungApi::getMeineStufen());
+
+        $this->assertEqualsCanonicalizing([$this->q1, $this->q2], $ids);
+        $this->erwarteFehler(fn () => StufenleitungApi::meineStufeUebernehmen($verwaist), 'nicht gefunden', 404);
+        $this->assertSame(0, $this->fx->zaehle('SELECT COUNT(*) FROM stufenleitungen'));
+    }
+
+    public function testVerwaisteStufenBeeinflussenDenHalbjahrVorschlagNicht(): void
+    {
+        $this->fx->stufe('EF', '2026/2027'); // verwaist: nicht in der Referenzmenge der Stufennamen
+
+        $v = StufenleitungApi::getHalbjahrVorschlag();
+
+        $this->assertSame(['schuljahr' => '2025/2026', 'abschnitt' => 2, 'fehlende_stufen' => ['Q1', 'Q2']], $v);
+    }
+
+    public function testMitDerStufeWerdenAuchDieStufenleitungsZuordnungenGeloescht(): void
+    {
+        $andere = $this->fx->benutzer('Otto', 'Anders', ['stufenleitung']);
+        $ziel = $this->fx->stufe('EF', '2026/2027');
+        $hj1 = $this->fx->halbjahr($ziel, 1);
+        $hj2 = $this->fx->halbjahr($ziel, 2);
+        $this->fx->stufenleitung($this->sl, $ziel);
+        $this->fx->stufenleitung($andere, $ziel);
+        $this->fx->stufenleitung($this->sl, $this->q1);
+
+        // Solange noch ein Halbjahr übrig ist, bleibt die Stufe samt Zuständigkeiten
+        StufenleitungApi::deleteHalbjahr($hj1);
+        $this->assertSame(2, $this->fx->zaehle('SELECT COUNT(*) FROM stufenleitungen WHERE stufe_id = ?', [$ziel]));
+
+        // Mit dem letzten Halbjahr verschwindet die Stufe – und alle Zuordnungen dazu
+        StufenleitungApi::deleteHalbjahr($hj2);
+        $this->assertSame(0, $this->fx->zaehle('SELECT COUNT(*) FROM stufen WHERE id = ?', [$ziel]));
+        $this->assertSame(0, $this->fx->zaehle('SELECT COUNT(*) FROM stufenleitungen WHERE stufe_id = ?', [$ziel]));
+        $this->assertSame([$this->q1], array_map(fn ($s) => (int) $s['id'], MeController::handle()['stufen']), 'andere Zuständigkeiten bleiben');
+    }
+
+    public function testMigrationVerwaisteStufenLoeschtNurStufenOhneHalbjahr(): void
+    {
+        $verwaist = $this->fx->stufe('Q3', '2020/2021'); // aus einer alten Version übrig geblieben
+        $this->fx->stufenleitung($this->sl, $verwaist);
+        $this->fx->stufenleitung($this->sl, $this->q1);
+
+        $sql = (string) file_get_contents(__DIR__ . '/../../migrations/004_verwaiste_stufen.sql');
+        $this->db->exec($sql);
+        $this->db->exec($sql); // mehrfach ausführbar
+
+        $this->assertEqualsCanonicalizing([$this->q1, $this->q2], array_map('intval', array_column($this->fx->zeilen('SELECT id FROM stufen'), 'id')));
+        $this->assertSame([$this->q1], array_map('intval', array_column($this->fx->zeilen('SELECT stufe_id FROM stufenleitungen'), 'stufe_id')), 'Zuordnungen verwaister Stufen kaskadieren');
     }
 
     public function testStufenleitungOhneStufeIstMoeglich(): void

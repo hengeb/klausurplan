@@ -132,14 +132,17 @@ final class StufenleitungApiTest extends TestCase
 
         $this->assertSame($stufen, StufenleitungApi::getMeineStufen());
         $this->assertSame([1], $this->db->log[0]['params']);
+        $this->assertStringContainsString('EXISTS (SELECT 1 FROM halbjahre h WHERE h.stufe_id = s.id)', $this->db->log[0]['sql'], 'nur Stufen mit Halbjahren');
     }
 
     public function testStufeUebernehmen(): void
     {
-        $this->db->onScalar('/SELECT 1 FROM stufen WHERE id/', 1);
+        $this->db->onScalar('/SELECT 1 FROM stufen s WHERE s\.id = \?/', 1);
 
         $this->assertSame(['ok' => true], StufenleitungApi::meineStufeUebernehmen(5));
 
+        $pruefung = $this->db->aufrufe('/SELECT 1 FROM stufen s/')[0]['sql'];
+        $this->assertStringContainsString('FROM halbjahre h WHERE h.stufe_id = s.id', $pruefung, 'verwaiste Stufen zählen nicht');
         $this->assertSame([1, 5], $this->db->aufrufe('/^INSERT IGNORE INTO stufenleitungen/')[0]['params']);
     }
 
@@ -390,7 +393,7 @@ final class StufenleitungApiTest extends TestCase
 
     private function vorschlagDaten(array $stufenNamen, ?array $neuestes, array $vorhandene): void
     {
-        $this->db->onRows('/SELECT DISTINCT name FROM stufen/', array_map(fn ($n) => ['name' => $n], $stufenNamen));
+        $this->db->onRows('/SELECT DISTINCT s\.name FROM stufen s/', array_map(fn ($n) => ['name' => $n], $stufenNamen));
         if ($neuestes !== null) {
             $this->db->onRows('/ORDER BY s\.schuljahr DESC, h\.abschnitt DESC\s+LIMIT 1/', [$neuestes]);
         }

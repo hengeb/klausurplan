@@ -39,7 +39,7 @@ DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [R
   nie lesen, ausgeben oder in Tests verwenden.**
 - **Neuer/geänderter Code bekommt Tests.** Unit-Tests prüfen Logik und *welche* Statements gesendet werden;
   ob das SQL stimmt, prüfen nur die Integrationstests → SQL-Änderungen immer dort absichern.
-- Stand: 339 PHP-Unit-, 83 Integrations-, 38 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
+- Stand: 339 PHP-Unit-, 87 Integrations-, 38 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
   ≈ 99,85 % (offen nur `exit`, private Konstruktoren). Nicht abgedeckt: `public/*.php`-Einstiegsskripte, `setup.php`, `bin/`.
 - Test-Nahtstellen im Produktivcode (nicht entfernen): `Support\Prozess::beenden()` statt `exit`,
   `Database::setInstance()`, `Router::jsonBody($roh)`, `MoodleApi::alleNutzer()/get()` (protected).
@@ -100,7 +100,9 @@ Stufe erbt die Zuständigen der Vorgängerstufe (EF←Q2, Q1←EF, Q2←Q1 des V
 1. die Standard-Klausurliste (`GET /api/klausuren`; `?alle=1` zeigt alle Stufen; eine Liste je Stufe/Halbjahr),
 2. Vorauswahl von Stufe/Halbjahr beim Anlegen und im Excel-Import,
 3. den ✉️-Button und die **Übersichtsmail an die Stufenleitung** (siehe E-Mail).
-Entzug der Rolle `stufenleitung` löscht die Zuordnungen.
+Entzug der Rolle `stufenleitung` löscht die Zuordnungen. Als vorhanden gelten nur Stufen **mit Halbjahr**
+(„Meine Stufen“, Halbjahr-Vorschlag, Admin-Stufenliste); mit dem letzten Halbjahr wird die Stufe gelöscht und per
+`ON DELETE CASCADE` auch ihre `stufenleitungen`-Zuordnungen (Altlasten räumt Migration 004 auf).
 
 ## Datenmodell (Details: `migrations/001_schema.sql`)
 

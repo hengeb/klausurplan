@@ -121,7 +121,7 @@ final class AdminApiTest extends TestCase
 
     public function testStufenUndZuordnungenLesen(): void
     {
-        $this->db->onRows('/FROM stufen ORDER BY/', [['id' => 1, 'name' => 'Q2', 'schuljahr' => '2025/2026']]);
+        $this->db->onRows('/FROM stufen s\s+WHERE EXISTS/', [['id' => 1, 'name' => 'Q2', 'schuljahr' => '2025/2026']]);
         $this->assertSame('Q2', AdminApi::getStufen()[0]['name']);
 
         $this->db->onRows('/SELECT stufe_id FROM stufenleitungen/', [['stufe_id' => 1], ['stufe_id' => 2]]);

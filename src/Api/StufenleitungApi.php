@@ -104,6 +104,7 @@ class StufenleitungApi
     /**
      * Alle Stufen mit Flag, ob die angemeldete Person dafür zuständig ist.
      * Jede Stufenleitung verwaltet ihre Zuständigkeit selbst – ohne Admin.
+     * Nur Stufen, zu denen es (noch) Halbjahre gibt – verwaiste Stufen erscheinen nicht.
      *
      * @return list<array{id: int, name: string, schuljahr: string, ist_meine: int}>
      */
@@ -117,6 +118,7 @@ class StufenleitungApi
                     (sl.benutzer_id IS NOT NULL) AS ist_meine
              FROM stufen s
              LEFT JOIN stufenleitungen sl ON sl.stufe_id = s.id AND sl.benutzer_id = ?
+             WHERE EXISTS (SELECT 1 FROM halbjahre h WHERE h.stufe_id = s.id)
              ORDER BY s.schuljahr DESC, s.name"
         );
         $stmt->execute([Session::getBenutzerId()]);
@@ -129,7 +131,11 @@ class StufenleitungApi
         Session::requireRolle('stufenleitung');
         $db = Database::getInstance();
 
-        $stmt = $db->prepare('SELECT 1 FROM stufen WHERE id = ?');
+        // Nur Stufen mit Halbjahren gelten als vorhanden (verwaiste Stufen nicht)
+        $stmt = $db->prepare(
+            'SELECT 1 FROM stufen s WHERE s.id = ?
+             AND EXISTS (SELECT 1 FROM halbjahre h WHERE h.stufe_id = s.id)'
+        );
         $stmt->execute([$stufeId]);
         if ($stmt->fetchColumn() === false) {
             http_response_code(404);
@@ -530,7 +536,9 @@ class StufenleitungApi
 
         // Alle bekannten Stufennamen (Referenzmenge)
         $alleStufenNamen = $db->query(
-            "SELECT DISTINCT name FROM stufen ORDER BY name"
+            "SELECT DISTINCT s.name FROM stufen s
+             JOIN halbjahre h ON h.stufe_id = s.id
+             ORDER BY s.name"
         )->fetchAll(\PDO::FETCH_COLUMN);
 
         // Neuestes Halbjahr bestimmen
