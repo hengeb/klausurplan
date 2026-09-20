@@ -180,11 +180,11 @@ function renderMeineStufenKarte(karte, stufen, nachAenderung) {
         <h3 class="karte-titel">Meine Stufen (Stufenleitung)</h3>
         ${stufen.length
             ? `<p>${chips}</p>`
-            : '<p class="hinweis">Sie sind derzeit für keine Stufe zuständig.</p>'}
+            : '<p class="hinweis">Du bist derzeit für keine Stufe zuständig.</p>'}
         <p class="hinweis">
-            Die Zuständigkeit bestimmt, welche Klausuren standardmäßig in Ihrer Liste erscheinen
-            und für welche Stufen Sie Übersichts-E-Mails zur Anwesenheit erhalten.
-            Sie verwalten sie selbst.
+            Die Zuständigkeit bestimmt, welche Klausuren standardmäßig in deiner Liste erscheinen
+            und für welche Stufen du Übersichts-E-Mails zur Anwesenheit erhältst.
+            Du verwaltest sie selbst.
         </p>
         <button class="btn btn-sekundaer" type="button">Stufen verwalten</button>`;
     karte.querySelector('button').addEventListener('click', () => zeigeMeineStufenDialog(nachAenderung));
@@ -198,7 +198,7 @@ async function zeigeMeineStufenDialog(nachAenderung) {
         <div class="dialog" style="max-width:520px">
             <h3>Meine Stufen</h3>
             <p class="hinweis">
-                Setzen Sie einen Haken, um für eine Stufe zuständig zu sein. Änderungen gelten sofort.
+                Setze einen Haken, um für eine Stufe zuständig zu sein. Änderungen gelten sofort.
             </p>
             <div id="ms-liste"><p class="lade-text">Wird geladen…</p></div>
             <p id="ms-fehler" class="fehler" style="display:none"></p>
@@ -234,7 +234,7 @@ async function zeigeMeineStufenDialog(nachAenderung) {
     }
 
     if (stufen.length === 0) {
-        listeEl.innerHTML = '<p class="hinweis">Es gibt noch keine Stufen. Importieren Sie zuerst eine GoMST-Datei.</p>';
+        listeEl.innerHTML = '<p class="hinweis">Es gibt noch keine Stufen. Importiere zuerst eine GoMST-Datei.</p>';
         return;
     }
 
@@ -286,7 +286,7 @@ async function viewImport(el) {
         <h2>GoMST-Import</h2>
         <div class="karte">
             <p>
-                Bitte laden Sie die GoMST-Exportdatei (.dat) hoch.
+                Bitte lade die GoMST-Exportdatei (.dat) hoch.
                 Es werden nur klausurrelevante Kursarten importiert
                 (GKS, LK1, LK2, AB3, AB4). GKM und ZK werden übersprungen.
             </p>
@@ -331,7 +331,7 @@ async function viewImport(el) {
             const neueStufen = res.stufenleitung_neu ?? [];
             const stufenleitungHtml = neueStufen.length ? `
                 <div class="hinweis-box hinweis-info" style="margin-top:1rem">
-                    <strong>Sie sind jetzt Stufenleitung für:</strong>
+                    <strong>Du bist jetzt Stufenleitung für:</strong>
                     <ul class="sl-neu-liste">
                         ${neueStufen.map(st => `
                         <li>
@@ -341,7 +341,7 @@ async function viewImport(el) {
                         </li>`).join('')}
                     </ul>
                     <p class="hinweis" style="margin:0">
-                        Das geschieht automatisch beim Import. Die Zuständigkeit können Sie
+                        Das geschieht automatisch beim Import. Die Zuständigkeit kannst du
                         jederzeit unter „Meine Stufen“ auf der Übersichtsseite ändern.
                     </p>
                 </div>` : '';
@@ -729,7 +729,7 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
         <div class="tabelle-wrapper">
             <p class="tabelle-hinweis">
                 ${sGomst.length} Schüler*innen aus GoMST ohne Moodle-Konto-Zuordnung.
-                Wählen Sie das passende Moodle-Konto aus – die Zuordnung gilt für alle Kurse der Person.
+                Wähle das passende Moodle-Konto aus – die Zuordnung gilt für alle Kurse der Person.
             </p>
             <table class="zuordnungs-tabelle">
                 <thead>
@@ -773,7 +773,7 @@ function renderSchuelerZugeordnet(liste) {
         <div class="tabelle-wrapper zugeordnet-block" style="margin-top:2rem">
             <h3>Bereits zugeordnet (${liste.length})</h3>
             <p class="tabelle-hinweis">
-                Hier können Sie fehlerhafte Zuordnungen – auch automatisch erkannte – korrigieren.
+                Hier kannst du fehlerhafte Zuordnungen – auch automatisch erkannte – korrigieren.
                 „Aufheben“ verhindert außerdem, dass die Person bei künftigen Importen wieder automatisch zugeordnet wird.
             </p>
             <input type="search" class="filter-zugeordnet" data-liste="schueler"
@@ -829,7 +829,7 @@ function renderLehrkraefte(lKurse, lFrei) {
             <p class="tabelle-hinweis">
                 ${lKurse.length} Kürzel ohne Lehrkraft-Zuordnung.
                 Die Zuordnung gilt für alle Kurse mit dem jeweiligen Kürzel.
-                Lehrkräfte ohne Moodle-Konto legen Sie mit „Extern anlegen…“ an.
+                Lehrkräfte ohne Moodle-Konto legst du mit „Extern anlegen…“ an.
             </p>
             <table class="zuordnungs-tabelle">
                 <thead>
@@ -1649,9 +1649,9 @@ function renderKlausurenKopf(me) {
     const info = klausurenAlleStufen
         ? 'Angezeigt werden die Klausuren <strong>aller Stufen</strong>.'
         : stufen.length
-            ? `Angezeigt werden die Klausuren Ihrer Stufen (${stufen.map(s =>
-                `<strong>${escHtml(s.name)}</strong> <small>${escHtml(s.schuljahr)}</small>`).join(', ')}) und Ihrer eigenen Kurse.`
-            : 'Sie sind für keine Stufe zuständig – angezeigt werden nur die Klausuren Ihrer eigenen Kurse.';
+            ? `Angezeigt werden die Klausuren deiner Stufen (${stufen.map(s =>
+                `<strong>${escHtml(s.name)}</strong> <small>${escHtml(s.schuljahr)}</small>`).join(', ')}) und deiner eigenen Kurse.`
+            : 'Du bist für keine Stufe zuständig – angezeigt werden nur die Klausuren deiner eigenen Kurse.';
 
     return `
         <div class="filter-leiste">
@@ -1678,7 +1678,7 @@ function renderKlausurenUebersicht(el, klausuren, nachschreibtermine = [], me = 
 
     if (klausuren.length === 0) {
         el.innerHTML = `${kopf}<div class="karte"><p>Keine Klausuren vorhanden.
-            ${hatRolle('admin', 'stufenleitung') ? ' Nutzen Sie "Einzeln anlegen" oder "Excel-Import".' : ''}</p></div>`;
+            ${hatRolle('admin', 'stufenleitung') ? ' Nutze "Einzeln anlegen" oder "Excel-Import".' : ''}</p></div>`;
         bindeKlausurenKopf(el);
         renderLehrkraftNachschreibtermine(el, nachschreibtermine);
         return;
@@ -2085,9 +2085,9 @@ async function ladePasteImport(el, nachImport) {
         <div class="karte">
             <h3>Excel-Import</h3>
             <p>
-                Wählen Sie zuerst die Stufe (mit Halbjahr) aus, für die Sie Klausurtermine eintragen.
+                Wähle zuerst die Stufe (mit Halbjahr) aus, für die du Klausurtermine einträgst.
                 Die Vorlage enthält dann alle Kurse dieser Stufe.
-                Öffnen Sie sie in Excel, tragen Sie Datum, Uhrzeit und Dauer ein.
+                Öffne sie in Excel, trage Datum, Uhrzeit und Dauer ein.
                 Dann alles markieren (Strg+A), kopieren (Strg+C), in das Textfeld unten klicken und einfügen (Strg+V).
             </p>
             <p class="hinweis">

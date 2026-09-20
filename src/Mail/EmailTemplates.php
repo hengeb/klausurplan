@@ -19,7 +19,7 @@ class EmailTemplates
 
         return self::layout(
             "Anwesenheit eintragen – {$kursname}",
-            "<p>Bitte tragen Sie die Anwesenheit für Ihre Klausur ein.</p>
+            "<p>Bitte trage die Anwesenheit für deine Klausur ein.</p>
             <p><strong>Kurs:</strong> {$kursname}<br><strong>Datum:</strong> {$datum}</p>" .
             self::buttons($urlAlleDa, $urlEingabe)
         );
@@ -38,7 +38,7 @@ class EmailTemplates
 
         return self::layout(
             "Erinnerung: Anwesenheit eintragen – {$kursname}",
-            "<p><strong>Erinnerung:</strong> Die Anwesenheit für Ihre folgende Klausur wurde noch nicht eingetragen.</p>
+            "<p><strong>Erinnerung:</strong> Die Anwesenheit für deine folgende Klausur wurde noch nicht eingetragen.</p>
             <p><strong>Kurs:</strong> {$kursname}<br><strong>Datum:</strong> {$datum}</p>" .
             self::buttons($urlAlleDa, $urlEingabe)
         );
@@ -82,9 +82,9 @@ class EmailTemplates
 
         return self::layout(
             'Anwesenheit noch nicht eingetragen',
-            '<p>Für die folgenden Klausuren Ihrer Stufe(n) wurde eine Woche nach dem Termin noch keine Anwesenheit eingetragen:</p>'
+            '<p>Für die folgenden Klausuren deiner Stufe(n) wurde eine Woche nach dem Termin noch keine Anwesenheit eingetragen:</p>'
             . $tabellen
-            . '<p style="margin-top:1.5rem">Die Anwesenheit können Sie im '
+            . '<p style="margin-top:1.5rem">Die Anwesenheit kannst du im '
             . ($appUrl !== '' ? '<a href="' . $appUrl . '">Klausurplan</a>' : 'Klausurplan')
             . ' unter „Klausuren“ selbst erfassen.</p>'
         );
@@ -141,7 +141,7 @@ class EmailTemplates
                 <h2 style="color:#1a3a5c;margin-top:0">{$titelEsc}</h2>
                 {$inhalt}
                 <hr style="border:none;border-top:1px solid #e0e0e0;margin:2rem 0">
-                <p style="font-size:.8rem;color:#888">Diese E-Mail wurde automatisch vom Klausurplan-System versandt. Bitte antworten Sie nicht direkt auf diese Nachricht.</p>
+                <p style="font-size:.8rem;color:#888">Diese E-Mail wurde automatisch vom Klausurplan-System versandt. Bitte antworte nicht direkt auf diese Nachricht.</p>
             </div>
         </body>
         </html>

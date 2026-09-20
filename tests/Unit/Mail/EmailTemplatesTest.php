@@ -28,7 +28,7 @@ final class EmailTemplatesTest extends TestCase
     {
         $html = EmailTemplates::erstmeldung(['kurs_anzeigename' => 'Q2 Sport GK 1 SZ', 'termin_datum' => '2026-01-31'], self::TOKEN);
 
-        $this->assertStringContainsString('Bitte tragen Sie die Anwesenheit', $html);
+        $this->assertStringContainsString('Bitte trage die Anwesenheit', $html);
         $this->assertStringContainsString('Q2 Sport GK 1 SZ', $html);
         $this->assertStringContainsString('31.01.2026', $html);
         $this->assertStringContainsString('href="https://schule.example/klausurplan/anwesenheit/alle-da?token=abc123def456"', $html);

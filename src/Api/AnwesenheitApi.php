@@ -359,7 +359,7 @@ class AnwesenheitApi
         $inhalt = '
             <p>Kurs: <strong>' . htmlspecialchars($klausur['kurs_anzeigename']) . '</strong>
                &nbsp;|&nbsp; Datum: <strong>' . $datumStr . '</strong></p>
-            <p>Bitte setzen Sie einen Haken bei fehlenden Prüflingen:</p>
+            <p>Bitte setze einen Haken bei fehlenden Prüflingen:</p>
             <form method="post" action="/anwesenheit/token-eintrag">
                 <input type="hidden" name="token" value="' . htmlspecialchars($token) . '">
                 <table style="width:100%;border-collapse:collapse">

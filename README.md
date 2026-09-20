@@ -50,7 +50,7 @@ Empfohlene Verzeichnisstruktur – **nur `public/` darf per HTTP erreichbar sein
 
 ```
 /pfad/zum/projekt/           ← Projektverzeichnis (nicht öffentlich)
-├── .env                     ← legen Sie in Schritt 4 an
+├── .env                     ← legst du in Schritt 4 an
 ├── private.key              ← erzeugt der Setup-Assistent in Schritt 5
 ├── vendor/  src/  migrations/  composer.json
 └── public/                  ← Document Root der (Sub-)Domain
@@ -58,7 +58,7 @@ Empfohlene Verzeichnisstruktur – **nur `public/` darf per HTTP erreichbar sein
 
 Hochladen: `public/`, `src/`, `vendor/`, `migrations/`, `composer.json`.
 **Nicht** hochladen: `.git/`, `tests/`, `node_modules/`, `coverage/`, `package*.json`, `phpunit.xml.dist`,
-Ihre lokale `.env`, `*.key`, Exportdateien aus GoMST. Stellen Sie den Document Root der Domain auf `public/`.
+deine lokale `.env`, `*.key`, Exportdateien aus GoMST. Stelle den Document Root der Domain auf `public/`.
 
 ### 3. Datenbank anlegen
 
@@ -79,7 +79,7 @@ Die weiteren Dateien `migrations/002_…`, `003_…` sind nur für **Updates** b
 | `APP_ENV` | `production` |
 | `LTI_PRIVATE_KEY_FILE` | Pfad des RSA-Schlüssels, relativ zum Projektverzeichnis (Standard `private.key`) oder absolut |
 | `LTI_KID` | Kennung des Schlüssels (Standard `klausurplan-key-1`) |
-| `MOODLE_URL` | Adresse Ihrer Moodle-Installation |
+| `MOODLE_URL` | Adresse deiner Moodle-Installation |
 | `MOODLE_API_TOKEN` | Webservice-Token für den Nutzerabgleich |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM_NAME` | Postausgang |
 | `SMTP_ENCRYPTION` | `ssl` (Port 465) oder `tls` (Port 587, STARTTLS) |
@@ -98,7 +98,7 @@ Die `.env` niemals committen oder in `public/` legen. Dateirechte am besten `600
    eintragen und die Plattform registrieren.
 5. **Schritt 4:** `SETUP_TOKEN` wieder aus der `.env` **entfernen** – danach ist `/setup.php` nicht mehr erreichbar.
 
-Binden Sie das Tool anschließend in Moodle an gewünschter Stelle als Aktivität/Link ein.
+Binde das Tool anschließend in Moodle an gewünschter Stelle als Aktivität/Link ein.
 
 ### 6. Moodle für den Nutzerabgleich vorbereiten
 
@@ -106,11 +106,11 @@ Binden Sie das Tool anschließend in Moodle an gewünschter Stelle als Aktivitä
   einem technischen Konto zuweisen und für dieses ein **Token** erzeugen → `MOODLE_API_TOKEN`.
 - Benutzerdefiniertes Profilfeld mit Kurznamen **`klasse`**: Lehrkräfte haben dort exakt den Wert `Lehrkraft`,
   Schüler*innen ihre Stufe/Klasse (z. B. `Q2` oder `Q1 Kurs 3`; das führende Kürzel wird als Stufe verwendet).
-- Lehrkräfte haben ihr Kürzel im Nachnamen in Klammern: `Gebauer (SZ)`.
+- Lehrkräfte haben ihr Kürzel im Nachnamen in Klammern: `Mustermann (MU)`.
 
 ### 7. Erster Start
 
-1. Als **Moodle-Systemadministrator*in** das Tool in Moodle öffnen – Sie werden automatisch *Administrator*in*.
+1. Als **Moodle-Systemadministrator*in** das Tool in Moodle öffnen – du wirst automatisch *Administrator*in*.
 2. *Administration → Moodle-Nutzer synchronisieren* ausführen.
 3. Unter *Benutzerverwaltung* die Rolle **Stufenleitung** an die zuständigen Personen vergeben (die Stufen wählen
    diese anschließend selbst). Bei Bedarf *Fächerbezeichnungen* anpassen.
@@ -143,7 +143,7 @@ mit Lehrkraft das ✉️ anklicken – die Mail sollte ankommen. Fehler des Cron
    veralteten Klassen bleiben). `vendor/` nur hochladen, wenn sich `composer.lock` geändert hat.
    **`.env` und `private.key` nicht überschreiben.**
 3. **Datenbank-Migrationen einspielen:** in phpMyAdmin (*Importieren*) alle Dateien aus `migrations/` einspielen,
-   die Ihre Installation noch nicht kennt – **in aufsteigender Reihenfolge**. `001_schema.sql` wird bei einem
+   die deine Installation noch nicht kennt – **in aufsteigender Reihenfolge**. `001_schema.sql` wird bei einem
    Update *nicht* erneut eingespielt.
 
    | Datei | Inhalt | Hinweis |
@@ -151,7 +151,7 @@ mit Lehrkraft das ✉️ anklicken – die Mail sollte ankommen. Fehler des Cron
    | `002_remove_raum.sql` | entfernt das Feld „Raum“ | nur **einmal** und nur, wenn `klausuren` noch die Spalte `raum` hat (Installationen aus einem alten Stand) |
    | `003_zuordnungen_extern.sql` | dauerhafte Zuordnungen, externe Lehrkräfte, Stufenleitungs-Mails | mehrfach ausführbar; übernimmt bestehende Zuordnungen |
 
-   Jede neue Migration wird hier eingetragen. Notieren Sie sich, welche Nummer bei Ihnen zuletzt eingespielt wurde.
+   Jede neue Migration wird hier eingetragen. Notiere dir, welche Nummer bei dir zuletzt eingespielt wurde.
 4. **Prüfen:** Tool aus Moodle öffnen (Browser-Cache mit `Strg+F5` leeren, falls die Seite alt aussieht),
    Klausurliste und Zuordnungen öffnen. Bei einem weißen Bildschirm/Fehler: PHP-Error-Log des Servers ansehen.
 5. **Zurückrollen:** alte Dateien wieder hochladen und den DB-Export einspielen.

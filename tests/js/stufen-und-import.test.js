@@ -105,7 +105,7 @@ test('Import zeigt neu erlangte Zuständigkeit und erlaubt Abgabe per Klick', as
     await warten();
 
     assert.match(d.querySelector('#import-ergebnis').textContent, /Import erfolgreich/);
-    assert.match(d.querySelector('#import-ergebnis').textContent, /Sie sind jetzt Stufenleitung für/);
+    assert.match(d.querySelector('#import-ergebnis').textContent, /Du bist jetzt Stufenleitung für/);
     assert.match(d.querySelector('.sl-neu-liste').textContent, /EF/);
 
     d.querySelector('.btn-sl-abgeben').click();

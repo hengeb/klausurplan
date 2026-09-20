@@ -14,7 +14,8 @@ DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [R
   per phpMyAdmin). Nichts entwerfen, das Shell-Zugriff auf dem Server voraussetzt.
 - `.env` liegt **oberhalb von `public/`**, wird manuell angelegt, nie committet; phpdotenv lädt sie
   bedingungslos (`createImmutable()->load()`). Wichtig: Immutable → echte Umgebungsvariablen haben Vorrang.
-- Kommentare auf Deutsch. **UI-Texte gendergerecht** („Schüler*innen“, „Teilnehmende“, „Lehrkraft“,
+- Kommentare auf Deutsch. **Anrede im ganzen Projekt „du“** (UI, E-Mails, Fehlermeldungen, README) – nie „Sie“/„Ihr“.
+  **UI-Texte gendergerecht** („Schüler*innen“, „Teilnehmende“, „Lehrkraft“,
   „Administrator*in“); in PHP-Code und DB-Bezeichnern nicht nötig.
 - Fehler: Exceptions → JSON `{"fehler": "..."}` mit HTTP-Status. Handler setzen 403/404/409/422 selbst
   (`http_response_code()`) und werfen dann `RuntimeException`; der Router behält diesen Status (sonst 400).
