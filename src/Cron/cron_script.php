@@ -1,10 +1,11 @@
 <?php
 
 /**
- * Cron-Script: Anwesenheits-E-Mails an Fachlehrkräfte senden.
+ * Cron-Script: Moodle-Nutzer synchronisieren (höchstens einmal täglich) und
+ * Anwesenheits-E-Mails an Fachlehrkräfte senden.
  * Erstmeldung sobald der Klausurtermin vergangen ist; solange danach keine Anwesenheit
  * erfasst wurde, täglich eine Erinnerung.
- * Empfohlener Cron-Eintrag: 0 * * * * php /var/www/klausurplan/src/Cron/erinnerungen_senden.php
+ * Empfohlener Cron-Eintrag: 0 * * * * php /var/www/klausurplan/src/Cron/cron_script.php
  */
 
 declare(strict_types=1);
@@ -12,6 +13,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../vendor/autoload.php';
 
 use Dotenv\Dotenv;
+use Klausurplan\Auth\MoodleApi;
 use Klausurplan\Models\Database;
 use Klausurplan\Mail\Mailer;
 use Klausurplan\Mail\EmailTemplates;
@@ -20,6 +22,21 @@ $dotenv = Dotenv::createImmutable(__DIR__ . '/../..');
 $dotenv->load();
 
 $db = Database::getInstance();
+
+// ------------------------------------------------------------------
+// Moodle-Nutzer synchronisieren – höchstens einmal täglich (unabhängig vom manuellen
+// „Jetzt synchronisieren“ in der Administration, das jederzeit zusätzlich möglich bleibt)
+// ------------------------------------------------------------------
+if (!MoodleApi::wurdeHeuteSynchronisiert()) {
+    try {
+        $syncErgebnis = (new MoodleApi())->sync();
+        echo date('[H:i:s]') . " OK  (Moodle-Sync): {$syncErgebnis['neu']} neu, "
+            . "{$syncErgebnis['aktualisiert']} aktualisiert, {$syncErgebnis['geloescht']} gelöscht, "
+            . "{$syncErgebnis['gesamt']} gesamt\n";
+    } catch (Throwable $e) {
+        echo date('[H:i:s]') . " ERR (Moodle-Sync): {$e->getMessage()}\n";
+    }
+}
 
 // Vergangene Klausuren mit bekannter Lehrkraft-E-Mail, für die noch keine Anwesenheit erfasst ist.
 // Sobald Anwesenheit erfasst ist (egal ob über den Mail-Link oder direkt im Tool), entfällt jede

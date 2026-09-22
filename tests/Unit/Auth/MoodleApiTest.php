@@ -292,4 +292,28 @@ final class MoodleApiTest extends TestCase
         $this->assertSame([4, 2], $update['params'], 'die Person mit der größten Moodle-ID (zuerst geliefert) behält das Kürzel');
         $this->assertStringContainsString('extern = 0', $this->db->aufrufe('/HAVING COUNT/')[0]['sql']);
     }
+
+    // ------------------------------------------------------------------ Tages-Status (für den Cronjob)
+
+    public function testSyncMarkiertDenTagAlsSynchronisiert(): void
+    {
+        $this->datenbankMitBenutzern([]);
+
+        (new MoodleApiMitNutzern([]))->sync();
+
+        $upsert = $this->db->aufrufe('/INSERT INTO moodle_sync_status/')[0];
+        $this->assertStringContainsString('ON DUPLICATE KEY UPDATE', $upsert['sql']);
+        $this->assertSame([], $upsert['params'], 'id und Zeitpunkt kommen direkt aus SQL (1, NOW())');
+    }
+
+    public function testWurdeHeuteSynchronisiert(): void
+    {
+        // Erster Aufruf: heute schon synchronisiert; zweiter: noch nicht
+        $this->db->on('/FROM moodle_sync_status/', [FakeResult::scalar(1), FakeResult::leer()]);
+
+        $this->assertTrue(MoodleApi::wurdeHeuteSynchronisiert());
+        $this->assertFalse(MoodleApi::wurdeHeuteSynchronisiert());
+
+        $this->assertStringContainsString('DATE(zuletzt_am) = CURDATE()', $this->db->log[0]['sql']);
+    }
 }

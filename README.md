@@ -116,18 +116,25 @@ Binde das Tool anschließend in Moodle an gewünschter Stelle als Aktivität/Lin
    diese anschließend selbst). Bei Bedarf *Fächerbezeichnungen* anpassen.
 4. Stufenleitung: **GOMSTH-Import** → **Zuordnungen** prüfen → **Klausuren** anlegen (Excel-Import oder einzeln).
 
-### 8. Cronjob für die E-Mails einrichten
+### 8. Cronjob einrichten
 
 Beim Hoster einen Cronjob **stündlich** anlegen (Cron-Verwaltung im Hosting-Panel):
 
 ```
-0 * * * * php /pfad/zum/projekt/src/Cron/erinnerungen_senden.php
+0 * * * * php /pfad/zum/projekt/src/Cron/cron_script.php
 ```
 
-Das Skript versendet Anwesenheits-Mails an Fachlehrkräfte: eine Erstmeldung, sobald der Klausurtermin vergangen ist,
-danach täglich eine Erinnerung, solange keine Anwesenheit erfasst ist. Es liest die `.env` im Projektverzeichnis.
-Test: in der Klausurliste bei einer Klausur mit Lehrkraft das ✉️ anklicken – die Mail sollte ankommen. Fehler des
-Cronjobs stehen in dessen Ausgabe/Mail.
+Das Skript erledigt zwei Dinge:
+
+1. **Moodle-Nutzer synchronisieren** – wie der Knopf in der Administration, aber automatisch und höchstens
+   einmal täglich (unabhängig davon bleibt der manuelle Knopf jederzeit zusätzlich nutzbar). Voraussetzung sind
+   `MOODLE_URL`/`MOODLE_API_TOKEN` in der `.env`; ohne die schlägt nur dieser Schritt fehl (im Log vermerkt), der
+   Rest läuft normal weiter.
+2. **Anwesenheits-Mails an Fachlehrkräfte** – eine Erstmeldung, sobald der Klausurtermin vergangen ist, danach
+   täglich eine Erinnerung, solange keine Anwesenheit erfasst ist.
+
+Es liest die `.env` im Projektverzeichnis. Test: in der Klausurliste bei einer Klausur mit Lehrkraft das ✉️
+anklicken – die Mail sollte ankommen. Fehler des Cronjobs stehen in dessen Ausgabe/Mail.
 
 ---
 
@@ -153,6 +160,7 @@ Cronjobs stehen in dessen Ausgabe/Mail.
    | `003_zuordnungen_extern.sql` | dauerhafte Zuordnungen, externe Lehrkräfte, Stufenleitungs-Mails | mehrfach ausführbar; übernimmt bestehende Zuordnungen |
    | `004_verwaiste_stufen.sql` | löscht Stufen ohne Halbjahr (Altlasten in der Stufenauswahl) | mehrfach ausführbar |
    | `005_entferne_stufenleitung_erinnerungen.sql` | entfernt die Übersichtsmail an die Stufenleitung wieder | mehrfach ausführbar |
+   | `006_moodle_sync_status.sql` | für den täglich automatischen Moodle-Sync im Cronjob | mehrfach ausführbar |
 
    Jede neue Migration wird hier eingetragen. Notiere dir, welche Nummer bei dir zuletzt eingespielt wurde.
 4. **Prüfen:** Tool aus Moodle öffnen (Browser-Cache mit `Strg+F5` leeren, falls die Seite alt aussieht),

@@ -39,7 +39,7 @@ DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [R
   nie lesen, ausgeben oder in Tests verwenden.**
 - **Neuer/geänderter Code bekommt Tests.** Unit-Tests prüfen Logik und *welche* Statements gesendet werden;
   ob das SQL stimmt, prüfen nur die Integrationstests → SQL-Änderungen immer dort absichern.
-- Stand: 340 PHP-Unit-, 89 Integrations-, 38 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
+- Stand: 342 PHP-Unit-, 93 Integrations-, 38 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
   ≈ 99,85 % (offen nur `exit`, private Konstruktoren). Nicht abgedeckt: `public/*.php`-Einstiegsskripte, `setup.php`, `bin/`.
 - Test-Nahtstellen im Produktivcode (nicht entfernen): `Support\Prozess::beenden()` statt `exit`,
   `Database::setInstance()`, `Router::jsonBody($roh)`, `MoodleApi::alleNutzer()/get()` (protected).
@@ -67,7 +67,7 @@ src/
   Mail/                    Mailer (PHPMailer/SMTP), EmailTemplates
   Models/                  Database (PDO-Singleton), Zuordnung (dauerhafte Zuordnungen + Matching)
   Support/Prozess.php      zentrales Beenden der Anfrage (Test-Nahtstelle für exit)
-  Cron/erinnerungen_senden.php   CLI-Cronjob (stündlich)
+  Cron/cron_script.php   CLI-Cronjob (stündlich)
 migrations/                001_schema.sql = vollständiges aktuelles Schema; 00N_*.sql = Deltas für bestehende Installationen
 bin/                       test-integration.sh; generate-lti-key.php / register-platform.php (CLI-Alternativen zu setup.php)
 tests/                     Unit/, Integration/, js/, Support/ (FakePdo, Fixtures, SmtpSenke, MoodleAttrappe), docker/
@@ -120,6 +120,8 @@ Namen deutsch, snake_case, Tabellen im Plural.
   `erinnerung`-Zeilen, da täglich erinnert wird).
 - `schueler_zuordnungen` / `lehrer_zuordnungen`: **dauerhafte** Zuordnung GOMSTH-Name/Kürzel → Konto (siehe unten).
 - `fach_bezeichnungen` (Kürzel → Name, vom Admin pflegbar), `lti2_*` (LTI-Bibliothek).
+- `moodle_sync_status` (eine Zeile, `id=1`): Zeitpunkt der letzten Moodle-Synchronisierung, für die
+  Einmal-täglich-Bremse des Cronjobs (siehe Moodle unten).
 - Kein Raum-Feld (bewusst entfernt).
 
 **Migrationen:** `001_schema.sql` ist immer der vollständige Endstand (Neuinstallation). Jede Änderung zusätzlich als
@@ -156,7 +158,7 @@ unabhängig voneinander per Zuordnung auf dasselbe Konto zeigen; `lehrer_zuordnu
 gewähltes Halbjahr, weil Kurskürzel nur je Halbjahr eindeutig sind. Import-Priorität: gleicher Kurs+Datum → aktualisieren;
 Klausur ohne Datum → füllen; sonst neu. Undatierte Klausuren stehen unter den datierten.
 
-**E-Mail** (`Cron/erinnerungen_senden.php`, stündlich; `Mail/`): Erstmeldung an die Fachlehrkraft, sobald der
+**E-Mail** (`Cron/cron_script.php`, stündlich; `Mail/`): Erstmeldung an die Fachlehrkraft, sobald der
 Klausurtermin (Datum+Uhrzeit) vergangen ist; solange danach keine Anwesenheit erfasst ist (egal ob per Mail-Link
 oder direkt im Tool), **täglich** eine Erinnerung – kein einmaliges Erinnern nach 7 Tagen mehr. Die Stufenleitung
 bekommt **keine** eigene Erinnerung (bewusst entfernte Funktion, siehe Migration 005). Links mit Token
@@ -167,6 +169,13 @@ bekommt **keine** eigene Erinnerung (bewusst entfernte Funktion, siehe Migration
 **Moodle** (`Auth/MoodleApi`): `core_user_get_users` für `auth=ldap` und `manual` (`{MOODLE_URL}/webservice/rest/server.php`).
 Lehrkraft = Custom-Field `klasse == "Lehrkraft"`; Kürzel aus dem Nachnamen (`Gebauer (SZ)` → `SZ`); E-Mail nur für
 Lehrkräfte; Stufe aus `klasse`. Nicht mehr vorhandene, unreferenzierte, nicht-externe Konten werden gelöscht.
+Ausgelöst wird `MoodleApi::sync()` auf zwei Wegen: manuell über `POST /api/admin/moodle-sync` (jederzeit, ohne
+Einschränkung) und automatisch als erster Schritt von `Cron/cron_script.php` – dort aber höchstens einmal
+täglich (`moodle_sync_status`, Tabelle mit einer Zeile `id=1`; `MoodleApi::wurdeHeuteSynchronisiert()` prüft
+`DATE(zuletzt_am) = CURDATE()` **in SQL**, um Zeitzonen-Differenzen zwischen PHP und der Datenbank zu vermeiden).
+Ein manueller Sync setzt denselben Zeitstempel, sodass der Cronjob am selben Tag nicht doppelt synchronisiert.
+Schlägt der automatische Sync fehl (z.B. `MOODLE_URL`/`MOODLE_API_TOKEN` nicht gesetzt), wird das geloggt, aber
+der Rest des Cronjobs (Anwesenheits-Mails) läuft trotzdem weiter; der nächste stündliche Lauf versucht es erneut.
 
 ## API (`public/api.php`)
 

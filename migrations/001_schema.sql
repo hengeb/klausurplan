@@ -164,6 +164,13 @@ CREATE TABLE IF NOT EXISTS fach_bezeichnungen (
     bezeichnung VARCHAR(100) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Einzige Zeile (id = 1): Zeitpunkt der letzten erfolgreichen Moodle-Synchronisierung
+-- (manuell oder über den Cronjob) – damit der Cronjob höchstens einmal täglich synchronisiert.
+CREATE TABLE IF NOT EXISTS moodle_sync_status (
+    id         TINYINT  NOT NULL PRIMARY KEY,
+    zuletzt_am DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Dauerhafte Zuordnung GOMSTH-Name → Moodle-Konto. Unabhängig von Kursen/Halbjahren,
 -- damit sie ein Löschen und erneutes Importieren überlebt.
 -- benutzer_id NULL = bewusst ohne Zuordnung (verhindert das automatische Matching).

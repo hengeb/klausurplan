@@ -111,7 +111,31 @@ class MoodleApi
         // Nicht mehr in Moodle vorhandene und nicht referenzierte Nutzer*innen löschen
         $geloescht = $this->loescheVeraltet($db, $geseheneMoodleIds);
 
+        self::markiereSynchronisiert($db);
+
         return ['neu' => $neu, 'aktualisiert' => $aktualisiert, 'geloescht' => $geloescht, 'gesamt' => count($moodleNutzer)];
+    }
+
+    /**
+     * Ob heute (Datum des Datenbankservers) bereits erfolgreich synchronisiert wurde – manuell über
+     * die Administration oder automatisch über den Cronjob. Der Cronjob nutzt das, um höchstens
+     * einmal täglich zu synchronisieren; ein manueller Klick auf „Jetzt synchronisieren“ ist davon
+     * unabhängig immer sofort möglich.
+     */
+    public static function wurdeHeuteSynchronisiert(): bool
+    {
+        $db = Database::getInstance();
+        return (bool) $db->query(
+            'SELECT 1 FROM moodle_sync_status WHERE id = 1 AND DATE(zuletzt_am) = CURDATE()'
+        )->fetchColumn();
+    }
+
+    private static function markiereSynchronisiert(\PDO $db): void
+    {
+        $db->prepare(
+            'INSERT INTO moodle_sync_status (id, zuletzt_am) VALUES (1, NOW())
+             ON DUPLICATE KEY UPDATE zuletzt_am = NOW()'
+        )->execute();
     }
 
     /**

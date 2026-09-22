@@ -30,7 +30,7 @@ final class SchemaMigrationTest extends IntegrationTestCase
             'benutzer', 'rollen', 'stufen', 'stufenleitungen', 'halbjahre', 'kurse', 'kurs_schueler', 'klausuren',
             'nachschreibtermine', 'nachschreib_zuordnungen', 'anwesenheiten', 'nachschreib_anwesenheiten',
             'email_benachrichtigungen', 'fach_bezeichnungen', 'schueler_zuordnungen', 'lehrer_zuordnungen',
-            'lti2_consumer', 'lti2_nonce',
+            'moodle_sync_status', 'lti2_consumer', 'lti2_nonce',
         ];
 
         $this->assertEmpty(array_diff($erwartet, $this->tabellen()));
@@ -135,5 +135,18 @@ final class SchemaMigrationTest extends IntegrationTestCase
         $this->db->exec($sql);
 
         $this->assertNotContains('stufenleitung_erinnerungen', $this->tabellen());
+    }
+
+    // ------------------------------------------------------------------ Migration 006: Moodle-Sync-Status
+
+    public function testMigration006IstMehrfachAusfuehrbar(): void
+    {
+        $this->db->exec('DROP TABLE IF EXISTS moodle_sync_status'); // Neuinstallation (001) hat sie schon
+
+        $sql = (string) file_get_contents(__DIR__ . '/../../migrations/006_moodle_sync_status.sql');
+        $this->db->exec($sql);
+        $this->db->exec($sql);
+
+        $this->assertContains('moodle_sync_status', $this->tabellen());
     }
 }

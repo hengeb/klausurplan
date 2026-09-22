@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Klausurplan\Tests\Integration;
 
+use Klausurplan\Auth\MoodleApi;
 use Klausurplan\Tests\Support\IntegrationTestCase;
+use Klausurplan\Tests\Support\MoodleAttrappe;
 use Klausurplan\Tests\Support\SmtpSenke;
 
 /**
- * Führt src/Cron/erinnerungen_senden.php als eigenen Prozess aus – gegen die Test-Datenbank
+ * Führt src/Cron/cron_script.php als eigenen Prozess aus – gegen die Test-Datenbank
  * und einen lokalen SMTP-Server. Das Skript liegt dazu in einer Temp-Kopie des Projekts, damit
  * seine .env (Dotenv lädt sie zwingend) die Testwerte enthält und keine echte .env berührt wird.
  */
@@ -18,9 +20,11 @@ final class CronTest extends IntegrationTestCase
     private SmtpSenke $senke;
     private int $sz;
     private int $q2;
+    private array $altEnv;
 
     protected function setUp(): void
     {
+        $this->altEnv = $_ENV;
         parent::setUp();
 
         $this->projekt = sys_get_temp_dir() . '/kp-cron-' . bin2hex(random_bytes(4));
@@ -41,6 +45,7 @@ final class CronTest extends IntegrationTestCase
             unlink($this->projekt . '/vendor');
             self::loesche($this->projekt);
         }
+        $_ENV = $this->altEnv;
         parent::tearDown();
     }
 
@@ -71,7 +76,7 @@ final class CronTest extends IntegrationTestCase
     {
         $env = array_merge($_SERVER, $_ENV, self::dbUmgebung(), $smtpUmgebung ?? $this->senke->umgebung());
         $prozess = proc_open(
-            [PHP_BINARY, $this->projekt . '/src/Cron/erinnerungen_senden.php'],
+            [PHP_BINARY, $this->projekt . '/src/Cron/cron_script.php'],
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             null,
@@ -191,5 +196,45 @@ final class CronTest extends IntegrationTestCase
 
         $this->assertStringContainsString('ERR (erstmeldung)', $ausgabe);
         $this->assertStringContainsString('1 Fehler', $ausgabe);
+    }
+
+    // ------------------------------------------------------------------ Moodle-Sync (Teil des Cronjobs)
+
+    public function testMoodleSyncLaeuftAlsTeilDesCronjobsAberHoechstensEinmalTaeglich(): void
+    {
+        $moodle = new MoodleAttrappe();
+        $_ENV['MOODLE_URL']       = $moodle->url;
+        $_ENV['MOODLE_API_TOKEN'] = 'ok';
+
+        $ausgabe = $this->cron();
+
+        $this->assertStringContainsString('OK  (Moodle-Sync): 2 neu', $ausgabe);
+        $this->assertTrue(MoodleApi::wurdeHeuteSynchronisiert());
+        $this->assertSame(2, $this->fx->zaehle('SELECT COUNT(*) FROM benutzer WHERE moodle_id IN (?, ?)', ['1', '2']));
+
+        // Noch am selben Tag: kein zweiter Sync
+        $ausgabe = $this->cron();
+
+        $this->assertStringNotContainsString('Moodle-Sync', $ausgabe);
+    }
+
+    public function testMoodleSyncWirdErneutVersuchtWennDerLetzteVersuchFehlgeschlagenIst(): void
+    {
+        // Ohne MOODLE_URL/MOODLE_API_TOKEN schlägt die Konfiguration fehl – der Sync gilt dann nicht als erledigt
+        $ausgabe = $this->cron();
+
+        $this->assertStringContainsString('ERR (Moodle-Sync): MOODLE_URL oder MOODLE_API_TOKEN nicht konfiguriert.', $ausgabe);
+        $this->assertFalse(MoodleApi::wurdeHeuteSynchronisiert());
+    }
+
+    public function testMoodleSyncBeeintraechtigtDenVersandDerAnwesenheitsMailsNicht(): void
+    {
+        $this->klausur($this->q2, 'A', $this->sz, $this->tage(2)); // ohne Moodle-Konfiguration → Sync schlägt fehl
+
+        $ausgabe = $this->cron();
+
+        $this->assertStringContainsString('ERR (Moodle-Sync)', $ausgabe);
+        $this->assertStringContainsString('OK  (erstmeldung)', $ausgabe);
+        $this->assertCount(1, $this->senke->mails());
     }
 }
