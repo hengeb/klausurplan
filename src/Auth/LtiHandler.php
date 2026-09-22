@@ -53,8 +53,11 @@ class LtiHandler extends Tool
         $benutzer = $this->syncBenutzer($moodleId, $vorname, $nachname, $email, $kuerzel);
         $rollen   = $this->ladeRollen($benutzer['id']);
 
-        // Moodle-Systemadmins erhalten immer die Admin-Rolle (Bootstrapping)
-        if ($userResult->isAdmin() && !in_array('admin', $rollen, true)) {
+        // Moodle-Systemadmins und -Manager erhalten automatisch die Admin-Rolle im Tool,
+        // bei jedem Login erneut geprüft. Die Synchronisierung fügt die Rolle nur hinzu –
+        // ein manuell (über die Benutzerverwaltung) vergebener oder entzogener Admin-Status
+        // für Personen ohne diese Moodle-Rolle wird dadurch nie automatisch verändert.
+        if (($userResult->isAdmin() || $userResult->isManager()) && !in_array('admin', $rollen, true)) {
             $this->weiseRolleZu($benutzer['id'], 'admin');
             $rollen[] = 'admin';
         }

@@ -30,10 +30,11 @@ final class SchemaMigrationTest extends IntegrationTestCase
             'benutzer', 'rollen', 'stufen', 'stufenleitungen', 'halbjahre', 'kurse', 'kurs_schueler', 'klausuren',
             'nachschreibtermine', 'nachschreib_zuordnungen', 'anwesenheiten', 'nachschreib_anwesenheiten',
             'email_benachrichtigungen', 'fach_bezeichnungen', 'schueler_zuordnungen', 'lehrer_zuordnungen',
-            'stufenleitung_erinnerungen', 'lti2_consumer', 'lti2_nonce',
+            'lti2_consumer', 'lti2_nonce',
         ];
 
         $this->assertEmpty(array_diff($erwartet, $this->tabellen()));
+        $this->assertNotContains('stufenleitung_erinnerungen', $this->tabellen(), 'entfernte Funktion (Migration 005) – bei Neuinstallationen entsteht sie gar nicht erst');
         $this->assertContains('extern', $this->spalten('benutzer'));
         $this->assertGreaterThan(20, $this->fx->zaehle('SELECT COUNT(*) FROM fach_bezeichnungen'), 'Fächer-Stammdaten');
     }
@@ -111,5 +112,28 @@ final class SchemaMigrationTest extends IntegrationTestCase
 
         $this->expectException(\PDOException::class);
         $this->db->prepare('INSERT INTO lehrer_zuordnungen (lehrer_kuerzel, benutzer_id) VALUES (?, ?)')->execute(['XX', 99999]);
+    }
+
+    // ------------------------------------------------------------------ Migration 005: SL-Erinnerungen entfernt
+
+    public function testMigration005EntferntDieStufenleitungErinnerungenTabelle(): void
+    {
+        $this->migration003(); // legt die Tabelle an (historischer Stand)
+        $this->assertContains('stufenleitung_erinnerungen', $this->tabellen());
+
+        $sql = (string) file_get_contents(__DIR__ . '/../../migrations/005_entferne_stufenleitung_erinnerungen.sql');
+        $this->db->exec($sql);
+        $this->db->exec($sql); // mehrfach ausführbar
+
+        $this->assertNotContains('stufenleitung_erinnerungen', $this->tabellen());
+    }
+
+    public function testMigration005OhneVorherigeTabelleTutNichts(): void
+    {
+        $sql = (string) file_get_contents(__DIR__ . '/../../migrations/005_entferne_stufenleitung_erinnerungen.sql');
+
+        $this->db->exec($sql);
+
+        $this->assertNotContains('stufenleitung_erinnerungen', $this->tabellen());
     }
 }

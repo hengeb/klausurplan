@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS fach_bezeichnungen (
     bezeichnung VARCHAR(100) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Dauerhafte Zuordnung GoMST-Name → Moodle-Konto. Unabhängig von Kursen/Halbjahren,
+-- Dauerhafte Zuordnung GOMSTH-Name → Moodle-Konto. Unabhängig von Kursen/Halbjahren,
 -- damit sie ein Löschen und erneutes Importieren überlebt.
 -- benutzer_id NULL = bewusst ohne Zuordnung (verhindert das automatische Matching).
 CREATE TABLE IF NOT EXISTS schueler_zuordnungen (
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS schueler_zuordnungen (
     FOREIGN KEY (geaendert_von) REFERENCES benutzer(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Dauerhafte Zuordnung GoMST-Lehrerkürzel → Lehrkraft (Moodle-Konto oder externe Lehrkraft)
+-- Dauerhafte Zuordnung GOMSTH-Lehrerkürzel → Lehrkraft (Moodle-Konto oder externe Lehrkraft)
 CREATE TABLE IF NOT EXISTS lehrer_zuordnungen (
     lehrer_kuerzel VARCHAR(20) NOT NULL PRIMARY KEY,
     benutzer_id    INT DEFAULT NULL,
@@ -184,16 +184,6 @@ CREATE TABLE IF NOT EXISTS lehrer_zuordnungen (
     geaendert_am   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (benutzer_id)   REFERENCES benutzer(id) ON DELETE CASCADE,
     FOREIGN KEY (geaendert_von) REFERENCES benutzer(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Übersichtsmails an die Stufenleitung: pro Klausur und Person nur einmal
-CREATE TABLE IF NOT EXISTS stufenleitung_erinnerungen (
-    klausur_id  INT NOT NULL,
-    benutzer_id INT NOT NULL,
-    gesendet_am DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (klausur_id, benutzer_id),
-    FOREIGN KEY (klausur_id)  REFERENCES klausuren(id) ON DELETE CASCADE,
-    FOREIGN KEY (benutzer_id) REFERENCES benutzer(id)  ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------

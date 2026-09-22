@@ -15,8 +15,8 @@ final class ZuordnungTest extends TestCase
     public static function namen(): array
     {
         return [
-            'GoMST-Format'         => ['Mustermann|Max Peter', ['Mustermann', 'Max Peter']],
-            'GoMST ohne Vorname'   => ['Mustermann|', ['Mustermann', '']],
+            'GOMSTH-Format'         => ['Mustermann|Max Peter', ['Mustermann', 'Max Peter']],
+            'GOMSTH ohne Vorname'   => ['Mustermann|', ['Mustermann', '']],
             'Komma-Format'         => ['Müller, Anna', ['Müller', 'Anna']],
             'Komma mit mehr Kommas' => ['Müller, Anna, Lena', ['Müller', 'Anna, Lena']],
             'Vorname Nachname'     => ['Anna Müller', ['Müller', 'Anna']],

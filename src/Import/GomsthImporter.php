@@ -8,18 +8,18 @@ use Klausurplan\Models\Database;
 use Klausurplan\Models\Zuordnung;
 use RuntimeException;
 
-class GomstImporter
+class GomsthImporter
 {
     private \PDO $db;
     private int  $importiertVon;
 
-    /** GoMST-Kursarten, die importiert werden */
+    /** GOMSTH-Kursarten, die importiert werden */
     private const KLAUSUR_KURSARTEN = ['GKS', 'LK1', 'LK2', 'AB3', 'AB4'];
 
-    /** Mappt GoMST-Rohwert auf vereinfachte Kursart ('LK' oder 'GK') */
-    private static function vereinfacheKursart(string $gomstKursart): string
+    /** Mappt GOMSTH-Rohwert auf vereinfachte Kursart ('LK' oder 'GK') */
+    private static function vereinfacheKursart(string $gomsthKursart): string
     {
-        return str_starts_with($gomstKursart, 'LK') ? 'LK' : 'GK';
+        return str_starts_with($gomsthKursart, 'LK') ? 'LK' : 'GK';
     }
 
     public function __construct(int $importiertVon)
@@ -29,7 +29,7 @@ class GomstImporter
     }
 
     /**
-     * Importiert eine GoMST-.dat-Datei (pipe-getrennt, UTF-8 mit BOM, CRLF).
+     * Importiert eine GOMSTH-.dat-Datei (pipe-getrennt, UTF-8 mit BOM, CRLF).
      *
      * @return array{kurse: int, schueler: int, entfernt: int, halbjahre: int, stufen_ids: list<int>}
      */
@@ -146,7 +146,7 @@ class GomstImporter
         $pflicht = ['Nachname', 'Vorname', 'Fach', 'Fachlehrer', 'Kursart', 'Kurs', 'Jahrgang', 'Abschnitt', 'Jahr'];
         foreach ($pflicht as $feld) {
             if (!array_key_exists($feld, $map)) {
-                throw new RuntimeException("Pflichtfeld '$feld' fehlt in der GoMST-Datei.");
+                throw new RuntimeException("Pflichtfeld '$feld' fehlt in der GOMSTH-Datei.");
             }
         }
 

@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Klausurplan\Tests\Integration;
 
 use Klausurplan\Api\StufenleitungApi;
-use Klausurplan\Import\GomstImporter;
+use Klausurplan\Import\GomsthImporter;
 use Klausurplan\Tests\Support\IntegrationTestCase;
 
-/** GoMST-Import, automatisches Matching und dauerhafte, korrigierbare Zuordnungen (echte SQL-Abfragen). */
+/** GOMSTH-Import, automatisches Matching und dauerhafte, korrigierbare Zuordnungen (echte SQL-Abfragen). */
 final class ImportUndZuordnungTest extends IntegrationTestCase
 {
     private int $sl;
@@ -52,11 +52,11 @@ final class ImportUndZuordnungTest extends IntegrationTestCase
 
     private function importiere(?string $inhalt = null): array
     {
-        $tmp = (string) tempnam(sys_get_temp_dir(), 'gomst');
+        $tmp = (string) tempnam(sys_get_temp_dir(), 'gomsth');
         file_put_contents($tmp, $inhalt ?? $this->datei());
         $this->tempDateien[] = $tmp;
         $_FILES = ['datei' => ['tmp_name' => $tmp, 'error' => UPLOAD_ERR_OK]];
-        return StufenleitungApi::gomstImport();
+        return StufenleitungApi::gomsthImport();
     }
 
     private function alleHalbjahreLoeschen(): void
@@ -94,7 +94,7 @@ final class ImportUndZuordnungTest extends IntegrationTestCase
         $this->assertSame($this->anna, (int) $this->fx->wert("SELECT lehrer_id FROM kurse WHERE kurs_kuerzel = 'SPA_Q2_GK1_SZ'"), 'Kürzel SZ → Anna');
         $this->assertNull($this->fx->wert("SELECT lehrer_id FROM kurse WHERE kurs_kuerzel = 'D_Q1_GK1_ZZ'"), 'Kürzel ZZ unbekannt');
         $this->assertSame(['Schüler|Eva', 'Zuordnung|Uwe'], array_column(
-            StufenleitungApi::getZuordnungen()['schueler_gomst'], 'name_roh'), 'offen: kein passendes Konto');
+            StufenleitungApi::getZuordnungen()['schueler_gomsth'], 'name_roh'), 'offen: kein passendes Konto');
     }
 
     public function testWiederholterImportIstIdempotent(): void
@@ -274,9 +274,9 @@ final class ImportUndZuordnungTest extends IntegrationTestCase
         $this->assertStringContainsString('Leitung', $halbjahre[0]['stufenleitungen']);
     }
 
-    public function testGomstImporterOhneSessionDirektAufrufbar(): void
+    public function testGomsthImporterOhneSessionDirektAufrufbar(): void
     {
-        $ergebnis = (new GomstImporter($this->sl))->importiere($this->datei());
+        $ergebnis = (new GomsthImporter($this->sl))->importiere($this->datei());
 
         $this->assertCount(2, $ergebnis['stufen_ids']);
     }

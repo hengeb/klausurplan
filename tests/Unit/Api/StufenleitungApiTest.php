@@ -30,11 +30,11 @@ final class StufenleitungApiTest extends TestCase
         parent::tearDown();
     }
 
-    // ------------------------------------------------------------------ GoMST-Import
+    // ------------------------------------------------------------------ GOMSTH-Import
 
     private function hochladen(string $inhalt): void
     {
-        $tmp = (string) tempnam(sys_get_temp_dir(), 'gomst');
+        $tmp = (string) tempnam(sys_get_temp_dir(), 'gomsth');
         file_put_contents($tmp, $inhalt);
         $this->tempDateien[] = $tmp;
         $_FILES = ['datei' => ['tmp_name' => $tmp, 'error' => UPLOAD_ERR_OK]];
@@ -56,26 +56,26 @@ final class StufenleitungApiTest extends TestCase
     {
         $this->alsBenutzer(2, ['lehrkraft']);
 
-        $this->erwarteZugriffVerweigert(fn () => StufenleitungApi::gomstImport());
+        $this->erwarteZugriffVerweigert(fn () => StufenleitungApi::gomsthImport());
     }
 
     public function testImportOhneDateiWirdAbgelehnt(): void
     {
-        $this->erwarteFehler(fn () => StufenleitungApi::gomstImport(), 'Keine gültige Datei', 400);
+        $this->erwarteFehler(fn () => StufenleitungApi::gomsthImport(), 'Keine gültige Datei', 400);
     }
 
     public function testImportMitUploadFehlerNenntDenFehlercode(): void
     {
         $_FILES = ['datei' => ['tmp_name' => '', 'error' => UPLOAD_ERR_INI_SIZE]];
 
-        $this->erwarteFehler(fn () => StufenleitungApi::gomstImport(), 'Fehlercode: ' . UPLOAD_ERR_INI_SIZE);
+        $this->erwarteFehler(fn () => StufenleitungApi::gomsthImport(), 'Fehlercode: ' . UPLOAD_ERR_INI_SIZE);
     }
 
     public function testImportEinerLeerenDatei(): void
     {
         $this->hochladen('');
 
-        $this->erwarteFehler(fn () => StufenleitungApi::gomstImport(), 'leer');
+        $this->erwarteFehler(fn () => StufenleitungApi::gomsthImport(), 'leer');
     }
 
     public function testImportMachtStufenleitungZustaendigUndMeldetNeueStufen(): void
@@ -83,7 +83,7 @@ final class StufenleitungApiTest extends TestCase
         $this->bestehendeStufe();
         $this->hochladen(self::DATEI);
 
-        $ergebnis = StufenleitungApi::gomstImport();
+        $ergebnis = StufenleitungApi::gomsthImport();
 
         $this->assertSame([['id' => 5, 'name' => 'Q2', 'schuljahr' => '2025/2026']], $ergebnis['stufenleitung_neu']);
         $this->assertSame(1, $ergebnis['kurse']);
@@ -97,7 +97,7 @@ final class StufenleitungApiTest extends TestCase
         $this->db->onRows('/SELECT stufe_id FROM stufenleitungen/', [['stufe_id' => 5]]); // schon zuständig
         $this->hochladen(self::DATEI);
 
-        $ergebnis = StufenleitungApi::gomstImport();
+        $ergebnis = StufenleitungApi::gomsthImport();
 
         $this->assertSame([], $ergebnis['stufenleitung_neu']);
     }
@@ -108,7 +108,7 @@ final class StufenleitungApiTest extends TestCase
         $this->bestehendeStufe();
         $this->hochladen(self::DATEI);
 
-        $ergebnis = StufenleitungApi::gomstImport();
+        $ergebnis = StufenleitungApi::gomsthImport();
 
         $this->assertSame([], $ergebnis['stufenleitung_neu']);
         $this->assertFalse($this->db->wurdeAusgefuehrt('/stufenleitungen/'));
@@ -175,12 +175,17 @@ final class StufenleitungApiTest extends TestCase
 
         $z = StufenleitungApi::getZuordnungen();
 
-        $this->assertSame(['schueler_gomst', 'schueler_moodle', 'schueler_zugeordnet', 'lehrkraefte_kurse',
+        $this->assertSame(['schueler_gomsth', 'schueler_moodle', 'schueler_zugeordnet', 'lehrkraefte_kurse',
             'lehrkraefte_moodle', 'lehrkraefte_zugeordnet', 'externe_lehrkraefte'], array_keys($z));
         $this->assertSame(['Adler|Ada', 'Anders|Otto', 'Schüler|Eva'], array_column($z['schueler_zugeordnet'], 'name_roh'),
             'aktuelle und nur gespeicherte Zuordnungen, alphabetisch');
         $this->assertSame(['AB', 'SZ'], array_column($z['lehrkraefte_zugeordnet'], 'lehrer_kuerzel'));
         $this->assertSame([['id' => 9, 'kuerzel' => 'XT']], $z['externe_lehrkraefte']);
+
+        // b.email steht in den Lehrkraft-Abfragen, damit das Frontend fehlende Adressen markieren kann
+        $this->assertStringContainsString('b.email', $this->db->aufrufe('/FROM benutzer b\s+WHERE EXISTS/')[0]['sql']);
+        $this->assertStringContainsString('b.email', $this->db->aufrufe('/MAX\(z\.lehrer_kuerzel IS NOT NULL\)/')[0]['sql']);
+        $this->assertStringContainsString('b.email', $this->db->aufrufe('/FROM lehrer_zuordnungen z\s+JOIN benutzer/')[0]['sql']);
     }
 
     public function testGetZuordnungenErfordertAdminOderStufenleitung(): void
@@ -325,13 +330,12 @@ final class StufenleitungApiTest extends TestCase
     public static function ungueltigeExterne(): array
     {
         return [
-            'Vorname fehlt'   => [['vorname' => ''], 'Vor- und Nachname'],
-            'Nachname fehlt'  => [['nachname' => '  '], 'Vor- und Nachname'],
-            'Name zu lang'    => [['nachname' => str_repeat('x', 101)], 'Vor- und Nachname'],
-            'Kürzel fehlt'    => [['kuerzel' => ''], 'Kürzel ist erforderlich'],
-            'Kürzel zu lang'  => [['kuerzel' => str_repeat('K', 21)], 'Kürzel ist erforderlich'],
-            'E-Mail ungültig' => [['email' => 'keine-mail'], 'gültige E-Mail'],
-            'E-Mail fehlt'    => [['email' => ''], 'gültige E-Mail'],
+            'Nachname fehlt'      => [['nachname' => '  '], 'Nachname ist erforderlich'],
+            'Nachname zu lang'    => [['nachname' => str_repeat('x', 101)], 'Nachname ist erforderlich'],
+            'Vorname zu lang'     => [['vorname' => str_repeat('x', 101)], 'Vorname ist zu lang'],
+            'Kürzel fehlt'        => [['kuerzel' => ''], 'Kürzel ist erforderlich'],
+            'Kürzel zu lang'      => [['kuerzel' => str_repeat('K', 21)], 'Kürzel ist erforderlich'],
+            'E-Mail ungültig'     => [['email' => 'keine-mail'], 'gültige E-Mail'],
         ];
     }
 
@@ -341,6 +345,35 @@ final class StufenleitungApiTest extends TestCase
     {
         $this->erwarteFehler(fn () => StufenleitungApi::addExterneLehrkraft($this->extern($abweichung)), $meldung, 400);
         $this->assertFalse($this->db->wurdeAusgefuehrt('/^INSERT/'));
+    }
+
+    public function testVornameIstKeinPflichtfeld(): void
+    {
+        $this->db->on('/^INSERT INTO benutzer/', FakeResult::insert(30));
+
+        StufenleitungApi::addExterneLehrkraft($this->extern(['vorname' => '']));
+
+        $insert = $this->db->aufrufe('/^INSERT INTO benutzer/')[0];
+        $this->assertSame(['', 'Tern', 'ex@schule2.de', 'XT'], array_slice($insert['params'], 1), 'leerer Vorname wird als leerer String gespeichert');
+    }
+
+    public function testEMailIstKeinPflichtfeld(): void
+    {
+        $this->db->on('/^INSERT INTO benutzer/', FakeResult::insert(30));
+
+        StufenleitungApi::addExterneLehrkraft($this->extern(['email' => '']));
+
+        $insert = $this->db->aufrufe('/^INSERT INTO benutzer/')[0];
+        $this->assertNull($insert['params'][3], 'leere E-Mail wird als NULL gespeichert, nicht als leerer String');
+    }
+
+    public function testEMailWirdGetrimmt(): void
+    {
+        $this->db->on('/^INSERT INTO benutzer/', FakeResult::insert(30));
+
+        StufenleitungApi::addExterneLehrkraft($this->extern(['email' => '  ex@schule2.de  ']));
+
+        $this->assertSame('ex@schule2.de', $this->db->aufrufe('/^INSERT INTO benutzer/')[0]['params'][3]);
     }
 
     public function testKuerzelDasSchonVergebenIstWirdAbgelehnt(): void
@@ -360,6 +393,15 @@ final class StufenleitungApiTest extends TestCase
         $this->assertSame(['ok' => true], $r);
         $update = $this->db->aufrufe('/^UPDATE benutzer/')[0];
         $this->assertSame(['Exi', 'Tern', 'neu@schule2.de', 30], $update['params'], 'das Kürzel bleibt unverändert');
+    }
+
+    public function testBearbeitenKannVornameUndEmailWiederEntfernen(): void
+    {
+        $this->db->onScalar('/SELECT 1 FROM benutzer WHERE id = \? AND extern = 1/', 1);
+
+        StufenleitungApi::updateExterneLehrkraft(30, $this->extern(['vorname' => '', 'email' => '']));
+
+        $this->assertSame(['', 'Tern', null, 30], $this->db->aufrufe('/^UPDATE benutzer/')[0]['params']);
     }
 
     public function testNurExterneLehrkraefteSindBearbeitbar(): void
@@ -612,7 +654,7 @@ final class StufenleitungApiTest extends TestCase
     public function testNurZusatzPruefllingeSindLoeschbar(): void
     {
         $this->erwarteFehler(fn () => StufenleitungApi::deleteZusatzSchuelerAusKurs(9, 70), 'nicht gefunden', 404);
-        $this->assertStringContainsString("NOT LIKE '%|%'", $this->db->log[0]['sql'], 'GoMST-Einträge sind geschützt');
+        $this->assertStringContainsString("NOT LIKE '%|%'", $this->db->log[0]['sql'], 'GOMSTH-Einträge sind geschützt');
 
         $this->db->onScalar('/SELECT id FROM kurs_schueler/', 70);
         $this->assertSame(['ok' => true], StufenleitungApi::deleteZusatzSchuelerAusKurs(9, 70));

@@ -105,11 +105,11 @@ $router->post('/admin/benutzer/{id}/stufenleitungen', function (array $p): array
 }, 'admin');
 
 // ------------------------------------------------------------------
-// Stufenleitung – GoMST-Import
+// Stufenleitung – GOMSTH-Import
 // ------------------------------------------------------------------
 // Datei-Upload: multipart/form-data, Feld "datei"
-$router->post('/stufenleitung/gomst-import', function (): array {
-    return StufenleitungApi::gomstImport();
+$router->post('/stufenleitung/gomsth-import', function (): array {
+    return StufenleitungApi::gomsthImport();
 }, 'admin', 'stufenleitung');
 
 // ------------------------------------------------------------------
@@ -276,7 +276,7 @@ $router->post('/anwesenheit/{klausur_id}', function (array $p): array {
 }, 'admin', 'stufenleitung', 'lehrkraft');
 
 // ------------------------------------------------------------------
-// Stufenleitung – Prüflinge eines Kurses (GoMST + manuell)
+// Stufenleitung – Prüflinge eines Kurses (GOMSTH + manuell)
 // ------------------------------------------------------------------
 $router->get('/stufenleitung/kurse/{kurs_id}/schueler', function (array $p): array {
     return StufenleitungApi::getKursSchueler((int) $p['kurs_id']);

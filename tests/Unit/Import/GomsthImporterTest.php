@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Klausurplan\Tests\Unit\Import;
 
-use Klausurplan\Import\GomstImporter;
+use Klausurplan\Import\GomsthImporter;
 use Klausurplan\Tests\Support\FakeResult;
 use Klausurplan\Tests\Support\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 
-final class GomstImporterTest extends TestCase
+final class GomsthImporterTest extends TestCase
 {
     private const KOPF = 'Nachname|Vorname|Fach|Fachlehrer|Kursart|Kurs|Jahrgang|Abschnitt|Jahr';
 
@@ -19,9 +19,9 @@ final class GomstImporterTest extends TestCase
         return "\xEF\xBB\xBF" . implode("\r\n", [$kopf, ...$zeilen]) . "\r\n";
     }
 
-    private function importer(): GomstImporter
+    private function importer(): GomsthImporter
     {
-        return new GomstImporter(99);
+        return new GomsthImporter(99);
     }
 
     /**
@@ -83,7 +83,7 @@ final class GomstImporterTest extends TestCase
         $this->assertSame(['SPA_Q2_GK1_SZ', 'M_Q2_LK1_MA', 'E_Q2_AB3_EN'], array_column(array_column($kurse, 'params'), 1));
     }
 
-    public function testKursartWirdVereinfachtUndKursschuelerBehaeltDieGomstKursart(): void
+    public function testKursartWirdVereinfachtUndKursschuelerBehaeltDieGomsthKursart(): void
     {
         $this->leereDatenbank();
 
@@ -301,7 +301,7 @@ final class GomstImporterTest extends TestCase
     {
         $this->db->onScalar('/FROM fach_bezeichnungen/', $fachname ?? false);
 
-        $this->assertSame($erwartet, GomstImporter::generiereAnzeigename($kuerzel, $fach, $kursart, $this->db));
+        $this->assertSame($erwartet, GomsthImporter::generiereAnzeigename($kuerzel, $fach, $kursart, $this->db));
         $this->assertSame([strtoupper($fach)], $this->db->log[0]['params'], 'Fachkürzel wird groß nachgeschlagen');
     }
 }

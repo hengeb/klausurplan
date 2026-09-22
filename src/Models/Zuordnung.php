@@ -7,9 +7,9 @@ namespace Klausurplan\Models;
 use PDO;
 
 /**
- * Zuordnung von GoMST-Daten zu Benutzer*innen.
+ * Zuordnung von GOMSTH-Daten zu Benutzer*innen.
  *
- * Manuelle Zuordnungen werden personenbezogen in `schueler_zuordnungen` (GoMST-Name)
+ * Manuelle Zuordnungen werden personenbezogen in `schueler_zuordnungen` (GOMSTH-Name)
  * bzw. `lehrer_zuordnungen` (Lehrerkürzel) gespeichert – nicht an Kursen. Sie überleben
  * damit das Löschen von Kursen/Halbjahren und werden beim nächsten Import wieder angewendet.
  * Ein Eintrag mit benutzer_id NULL bedeutet „bewusst nicht zugeordnet“: Dann findet
@@ -22,7 +22,7 @@ final class Zuordnung
     // ------------------------------------------------------------------
 
     /**
-     * Ermittelt das Moodle-Konto zu einem GoMST-Namen: erst die gespeicherte
+     * Ermittelt das Moodle-Konto zu einem GOMSTH-Namen: erst die gespeicherte
      * Zuordnung, sonst automatisches Namensmatching.
      */
     public static function ermittleSchuelerId(PDO $db, string $nameRoh): ?int
@@ -96,7 +96,7 @@ final class Zuordnung
 
     /**
      * Parst einen Namen in [nachname, vorname].
-     * Formate: "Nachname|Vorname" (GoMST), "Nachname, Vorname", "Vorname Nachname".
+     * Formate: "Nachname|Vorname" (GOMSTH), "Nachname, Vorname", "Vorname Nachname".
      *
      * @return array{0: string, 1: string}
      */

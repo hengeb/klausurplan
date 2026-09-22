@@ -16,10 +16,8 @@ final class CronTest extends IntegrationTestCase
 {
     private string $projekt;
     private SmtpSenke $senke;
-    private int $sl;
     private int $sz;
     private int $q2;
-    private int $q1;
 
     protected function setUp(): void
     {
@@ -33,11 +31,8 @@ final class CronTest extends IntegrationTestCase
 
         $this->senke = new SmtpSenke();
 
-        $this->sl = $this->fx->benutzer('Sarah', 'Leitung', ['stufenleitung', 'lehrkraft'], null, 'sl@example.org');
         $this->sz = $this->fx->benutzer('Anna', 'Lehrer (SZ)', ['lehrkraft'], 'SZ', 'sz@example.org');
         $this->q2 = $this->fx->stufe('Q2');
-        $this->q1 = $this->fx->stufe('Q1');
-        $this->fx->stufenleitung($this->sl, $this->q2);
     }
 
     protected function tearDown(): void
@@ -116,38 +111,62 @@ final class CronTest extends IntegrationTestCase
         $this->assertStringContainsString('alle-da?token=', $mails[0]['text']);
         $this->assertSame(1, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ? AND typ = 'erstmeldung'", [$klausur]));
 
+        // Derselbe Tag: keine zweite Mail
         $this->cron();
-        $this->assertSame(1, $this->fx->zaehle('SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ?', [$klausur]), 'keine zweite Erstmeldung');
+        $this->assertSame(1, $this->fx->zaehle('SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ?', [$klausur]));
     }
 
-    public function testErinnerungNachSiebenTagenOhneAntwort(): void
+    public function testErinnerungKommtTaeglichSolangeKeineAnwesenheitErfasstIst(): void
     {
-        $klausur = $this->klausur($this->q2, 'A', $this->sz, $this->tage(20));
-        $this->db->prepare("INSERT INTO email_benachrichtigungen (klausur_id, empfaenger_id, typ, token, gesendet_am) VALUES (?, ?, 'erstmeldung', ?, NOW() - INTERVAL 8 DAY)")
+        $klausur = $this->klausur($this->q2, 'A', $this->sz, $this->tage(5));
+        $this->db->prepare("INSERT INTO email_benachrichtigungen (klausur_id, empfaenger_id, typ, token, gesendet_am) VALUES (?, ?, 'erstmeldung', ?, NOW() - INTERVAL 3 DAY)")
+            ->execute([$klausur, $this->sz, bin2hex(random_bytes(32))]);
+
+        // 3 Tage seit der Erstmeldung her → eine Erinnerung
+        $this->cron();
+        $this->assertSame(1, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ? AND typ = 'erinnerung'", [$klausur]));
+
+        // Derselbe Tag: keine zweite Erinnerung
+        $this->cron();
+        $this->assertSame(1, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ? AND typ = 'erinnerung'", [$klausur]));
+
+        // Die (einzige) Erinnerung liegt jetzt "gestern" → nächster Lauf schickt die zweite
+        $this->db->prepare("UPDATE email_benachrichtigungen SET gesendet_am = NOW() - INTERVAL 1 DAY WHERE klausur_id = ? AND typ = 'erinnerung'")
+            ->execute([$klausur]);
+        $this->cron();
+
+        $this->assertSame(2, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ? AND typ = 'erinnerung'", [$klausur]));
+        $mails = array_values(array_filter($this->senke->mails(), fn ($m) => str_contains($m['an'], 'sz@example.org')));
+        $this->assertCount(2, $mails, 'zwei Erinnerungen versandt (keine erneute Erstmeldung)');
+        $this->assertStringStartsWith('[Erinnerung] ', $mails[0]['betreff']);
+    }
+
+    public function testKeineErinnerungWennDieLetzteMailNochKeinenTagHer(): void
+    {
+        $klausur = $this->klausur($this->q2, 'A', $this->sz, $this->tage(5));
+        $this->db->prepare("INSERT INTO email_benachrichtigungen (klausur_id, empfaenger_id, typ, token, gesendet_am) VALUES (?, ?, 'erstmeldung', ?, NOW() - INTERVAL 3 HOUR)")
             ->execute([$klausur, $this->sz, bin2hex(random_bytes(32))]);
 
         $this->cron();
 
-        $this->assertSame(1, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE typ = 'erinnerung'"));
-        $mail = array_values(array_filter($this->senke->mails(), fn ($m) => str_contains($m['an'], 'sz@example.org')))[0];
-        $this->assertStringStartsWith('[Erinnerung] ', $mail['betreff']);
-
-        $this->cron();
-        $this->assertSame(1, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE typ = 'erinnerung'"), 'Erinnerung nur einmalig');
+        $this->assertSame(0, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE typ = 'erinnerung'"));
     }
 
-    public function testKeineErinnerungWennBereitsBeantwortetOderZuFrisch(): void
+    public function testKeineWeitereMailWennAnwesenheitErfasstIst(): void
     {
-        $beantwortet = $this->klausur($this->q2, 'A', $this->sz, $this->tage(20));
-        $frisch = $this->klausur($this->q2, 'B', $this->sz, $this->tage(20));
-        $this->db->prepare("INSERT INTO email_benachrichtigungen (klausur_id, empfaenger_id, typ, token, gesendet_am, beantwortet_am) VALUES (?, ?, 'erstmeldung', ?, NOW() - INTERVAL 9 DAY, NOW())")
-            ->execute([$beantwortet, $this->sz, bin2hex(random_bytes(32))]);
-        $this->db->prepare("INSERT INTO email_benachrichtigungen (klausur_id, empfaenger_id, typ, token, gesendet_am) VALUES (?, ?, 'erstmeldung', ?, NOW() - INTERVAL 2 DAY)")
-            ->execute([$frisch, $this->sz, bin2hex(random_bytes(32))]);
+        // Die Erinnerung wurde nie per Link beantwortet (beantwortet_am bleibt NULL) – trotzdem hat
+        // die Lehrkraft die Anwesenheit direkt im Tool erfasst. Das allein muss reichen, um jede
+        // weitere Mail zu unterbinden.
+        $klausur = $this->klausur($this->q2, 'A', $this->sz, $this->tage(5));
+        $this->db->prepare("INSERT INTO email_benachrichtigungen (klausur_id, empfaenger_id, typ, token, gesendet_am) VALUES (?, ?, 'erstmeldung', ?, NOW() - INTERVAL 3 DAY)")
+            ->execute([$klausur, $this->sz, bin2hex(random_bytes(32))]);
+        $ks = (int) $this->fx->wert('SELECT id FROM kurs_schueler WHERE kurs_id = (SELECT kurs_id FROM klausuren WHERE id = ?)', [$klausur]);
+        $this->fx->anwesenheit($klausur, $ks, 'anwesend');
 
-        $this->cron();
+        $ausgabe = $this->cron();
 
-        $this->assertSame(0, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE typ = 'erinnerung'"));
+        $this->assertSame([], $this->senke->mails());
+        $this->assertStringContainsString('0 gesendet', $ausgabe);
     }
 
     public function testKlausurenOhneTerminOhneLehrkraftOderInDerZukunftBekommenKeineMail(): void
@@ -160,7 +179,7 @@ final class CronTest extends IntegrationTestCase
 
         $ausgabe = $this->cron();
 
-        $this->assertSame([], array_values(array_filter($this->senke->mails(), fn ($m) => !str_contains($m['an'], 'sl@example.org'))));
+        $this->assertSame([], $this->senke->mails());
         $this->assertStringContainsString('0 gesendet', $ausgabe);
     }
 
@@ -172,88 +191,5 @@ final class CronTest extends IntegrationTestCase
 
         $this->assertStringContainsString('ERR (erstmeldung)', $ausgabe);
         $this->assertStringContainsString('1 Fehler', $ausgabe);
-    }
-
-    // ------------------------------------------------------------------ Stufenleitung
-
-    private function slMails(): array
-    {
-        return array_values(array_filter($this->senke->mails(), fn ($m) => str_contains($m['an'], 'sl@example.org')));
-    }
-
-    public function testStufenleitungErhaeltEineWocheNachDerKlausurEineUebersichtNurFuerEigeneStufen(): void
-    {
-        $this->klausur($this->q2, 'EIGENE', $this->sz, $this->tage(10));
-        $this->klausur($this->q1, 'FREMDE', $this->sz, $this->tage(10));   // nicht die Stufe der SL
-
-        $ausgabe = $this->cron();
-
-        $this->assertStringContainsString('OK  (Stufenleitung): 1 Klausur(en) → sl@example.org', $ausgabe);
-        $mails = $this->slMails();
-        $this->assertCount(1, $mails);
-        $this->assertSame('Klausurplan: Anwesenheit noch nicht eingetragen', $mails[0]['betreff']);
-        $this->assertStringContainsString('Kurs EIGENE', $mails[0]['text']);
-        $this->assertStringNotContainsString('Kurs FREMDE', $mails[0]['text']);
-        $this->assertStringContainsString('Q2 (2025/2026)', $mails[0]['text']);
-    }
-
-    public function testStufenleitungsUebersichtKommtProKlausurNurEinmal(): void
-    {
-        $this->klausur($this->q2, 'A', $this->sz, $this->tage(10));
-        $this->cron();
-        $this->assertCount(1, $this->slMails());
-
-        $zweite = $this->klausur($this->q2, 'B', $this->sz, $this->tage(9));
-        $this->cron();
-
-        $mails = $this->slMails();
-        $this->assertCount(2, $mails);
-        $this->assertStringContainsString('Kurs B', $mails[1]['text']);
-        $this->assertStringNotContainsString('Kurs A', $mails[1]['text'], 'bereits gemeldete Klausur wird nicht wiederholt');
-        $this->assertSame(2, $this->fx->zaehle('SELECT COUNT(*) FROM stufenleitung_erinnerungen WHERE benutzer_id = ?', [$this->sl]));
-        unset($zweite);
-    }
-
-    public function testStufenleitungsUebersichtNurBeiFehlenderAnwesenheitUndNachSiebenTagen(): void
-    {
-        $erfasst = $this->klausur($this->q2, 'ERFASST', $this->sz, $this->tage(10));
-        $ks = $this->fx->wert('SELECT id FROM kurs_schueler LIMIT 1');
-        $this->fx->anwesenheit($erfasst, (int) $ks, 'anwesend');
-        $this->klausur($this->q2, 'FRISCH', $this->sz, $this->tage(3));
-        $this->klausur($this->q2, 'OFFEN', $this->sz, $this->tage(8), null);   // ohne Uhrzeit zählt der Tagesende
-        $leer = $this->fx->kurs($this->fx->halbjahr($this->q2), 'LEER', $this->sz, 'SZ');
-        $this->fx->klausur($leer, $this->tage(10), '08:00');                    // Kurs ohne Prüflinge
-
-        $this->cron();
-
-        $text = $this->slMails()[0]['text'];
-        $this->assertStringContainsString('Kurs OFFEN', $text);
-        foreach (['ERFASST', 'FRISCH', 'Kurs LEER'] as $nicht) {
-            $this->assertStringNotContainsString($nicht, $text);
-        }
-    }
-
-    public function testStufenleitungOhneStufeOderOhneMailAdresseBekommtNichts(): void
-    {
-        $this->fx->benutzer('Zoe', 'Ohne Stufe', ['stufenleitung'], null, 'zoe@example.org');
-        $ohneMail = $this->fx->benutzer('Ole', 'Ohne Mail', ['stufenleitung']);
-        $this->fx->stufenleitung($ohneMail, $this->q2);
-        $this->klausur($this->q2, 'A', $this->sz, $this->tage(10));
-
-        $this->cron();
-
-        $an = array_column($this->senke->mails(), 'an');
-        $this->assertCount(0, array_filter($an, fn ($a) => str_contains($a, 'zoe@')));
-        $this->assertCount(1, array_filter($an, fn ($a) => str_contains($a, 'sl@')));
-    }
-
-    public function testFehlgeschlagenerVersandMarkiertNichtsAlsGesendet(): void
-    {
-        $this->klausur($this->q2, 'A', $this->sz, $this->tage(10));
-
-        $ausgabe = $this->cron(SmtpSenke::toteUmgebung());
-
-        $this->assertStringContainsString('ERR (Stufenleitung)', $ausgabe);
-        $this->assertSame(0, $this->fx->zaehle('SELECT COUNT(*) FROM stufenleitung_erinnerungen'), 'wird beim nächsten Lauf erneut versucht');
     }
 }

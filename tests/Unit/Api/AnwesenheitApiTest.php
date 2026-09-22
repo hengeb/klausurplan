@@ -281,7 +281,7 @@ final class AnwesenheitApiTest extends TestCase
         $this->assertStringContainsString('Q2 &lt;Sport&gt; GK 1', $html);
         $this->assertStringContainsString('31.01.2026', $html);
         $this->assertStringContainsString('Mustermann, Max', $html);
-        $this->assertStringContainsString('Unbekannt, Uwe', $html, 'ungeklärte Namen aus GoMST werden lesbar dargestellt');
+        $this->assertStringContainsString('Unbekannt, Uwe', $html, 'ungeklärte Namen aus GOMSTH werden lesbar dargestellt');
         $this->assertStringContainsString('name="fehlend[]" value="1"', $html);
         $this->assertStringContainsString('name="kommentar_2"', $html);
         $this->assertStringContainsString('action="/anwesenheit/token-eintrag"', $html);

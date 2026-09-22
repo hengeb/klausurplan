@@ -148,6 +148,48 @@ final class LtiHandlerTest extends TestCase
         $this->assertFalse($this->db->wurdeAusgefuehrt('/INSERT IGNORE INTO rollen/'));
     }
 
+    public function testMoodleManagerBekommenEbenfallsDieAdminRolle(): void
+    {
+        $this->db->onRows('/FROM benutzer WHERE moodle_id/', [
+            ['id' => 5, 'vorname' => 'Anna', 'nachname' => 'Gebauer (SZ)', 'email' => 'a@x.de', 'kuerzel' => 'SZ'],
+        ]);
+        $this->db->onRows('/SELECT rolle FROM rollen/', [['rolle' => 'lehrkraft']]);
+        $this->tool->userResult = $this->nutzer(rollen: ['http://purl.imsglobal.org/vocab/lis/v2/membership#Manager']);
+
+        $this->launch();
+
+        $this->assertSame([[5, 'admin']], array_column($this->db->aufrufe('/INSERT IGNORE INTO rollen/'), 'params'));
+        $this->assertSame(['lehrkraft', 'admin'], $_SESSION['rollen']);
+    }
+
+    public function testAdminRolleWirdBeiJedemLoginErneutSynchronisiertAuchOhneNeuenNutzer(): void
+    {
+        // Bestehender Nutzer, der beim vorigen Login noch nicht admin/manager war – jetzt schon
+        $this->db->onRows('/FROM benutzer WHERE moodle_id/', [
+            ['id' => 5, 'vorname' => 'Anna', 'nachname' => 'Gebauer (SZ)', 'email' => 'a@x.de', 'kuerzel' => 'SZ'],
+        ]);
+        $this->db->onRows('/SELECT rolle FROM rollen/', [['rolle' => 'lehrkraft']]);
+        $this->tool->userResult = $this->nutzer(rollen: ['Manager']);
+
+        $this->launch();
+
+        $this->assertContains('admin', $_SESSION['rollen']);
+    }
+
+    public function testWederAdminNochManagerBleibtOhneAdminRolle(): void
+    {
+        $this->db->onRows('/FROM benutzer WHERE moodle_id/', [
+            ['id' => 5, 'vorname' => 'Anna', 'nachname' => 'Gebauer (SZ)', 'email' => 'a@x.de', 'kuerzel' => 'SZ'],
+        ]);
+        $this->db->onRows('/SELECT rolle FROM rollen/', [['rolle' => 'lehrkraft']]);
+        $this->tool->userResult = $this->nutzer(rollen: ['Learner']);
+
+        $this->launch();
+
+        $this->assertFalse($this->db->wurdeAusgefuehrt('/INSERT IGNORE INTO rollen/'));
+        $this->assertSame(['lehrkraft'], $_SESSION['rollen']);
+    }
+
     // ------------------------------------------------------------------ Nutzer synchronisieren
 
     public function testSyncBenutzerAktualisiertNurGeaenderteFelder(): void

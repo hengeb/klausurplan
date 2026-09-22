@@ -40,11 +40,11 @@ final class StufenleitungSelbstverwaltungTest extends IntegrationTestCase
 
     private function importiere(string $stufe, string $jahr = '2025'): array
     {
-        $tmp = (string) tempnam(sys_get_temp_dir(), 'gomst');
+        $tmp = (string) tempnam(sys_get_temp_dir(), 'gomsth');
         file_put_contents($tmp, "Nachname|Vorname|Fach|Fachlehrer|Kursart|Kurs|Jahrgang|Abschnitt|Jahr\r\nA|Anna|M|MA|LK1|M_{$stufe}_LK1_MA|{$stufe}|1|{$jahr}\r\n");
         $this->tempDateien[] = $tmp;
         $_FILES = ['datei' => ['tmp_name' => $tmp, 'error' => UPLOAD_ERR_OK]];
-        return StufenleitungApi::gomstImport();
+        return StufenleitungApi::gomsthImport();
     }
 
     public function testUebernehmenUndAbgeben(): void

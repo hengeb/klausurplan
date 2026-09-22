@@ -171,4 +171,59 @@ final class ExterneLehrkraefteTest extends IntegrationTestCase
         $this->assertSame(2, $this->fx->zaehle("SELECT COUNT(*) FROM anwesenheiten WHERE klausur_id = ? AND status = 'anwesend'", [$klausur]));
         $this->assertNotNull($this->fx->wert('SELECT beantwortet_am FROM email_benachrichtigungen WHERE token = ?', [$token]));
     }
+
+    // ------------------------------------------------------------------ Optionale Felder
+
+    public function testOhneVornameUndOhneEmailWirdKorrektAngelegt(): void
+    {
+        $r = StufenleitungApi::addExterneLehrkraft($this->extern(['vorname' => '', 'email' => '']));
+
+        $zeile = $this->fx->zeilen('SELECT vorname, email FROM benutzer WHERE id = ?', [$r['id']])[0];
+        $this->assertSame('', $zeile['vorname'], 'leerer Vorname wird gespeichert (nicht NULL – die Spalte ist NOT NULL)');
+        $this->assertNull($zeile['email']);
+    }
+
+    public function testOhneEmailKannKeineAnwesenheitsMailAusgeloestWerden(): void
+    {
+        $r = StufenleitungApi::addExterneLehrkraft($this->extern(['email' => '']));
+        $stufe = $this->fx->stufe('Q2');
+        $kurs = $this->fx->kurs($this->fx->halbjahr($stufe), 'D_Q2_GK1_XT', $r['id'], 'XT');
+        $klausur = $this->fx->klausur($kurs, '2026-01-31', '08:00');
+
+        $this->erwarteFehler(fn () => StufenleitungApi::emailAusloesen($klausur), 'keine E-Mail-Adresse hinterlegt', 422);
+    }
+
+    public function testFehlendeEmailWirdInDenZuordnungslistenErkennbar(): void
+    {
+        StufenleitungApi::addExterneLehrkraft($this->extern(['vorname' => '', 'email' => '']));
+
+        $externe = StufenleitungApi::getZuordnungen()['externe_lehrkraefte'];
+
+        $this->assertNull($externe[0]['email']);
+        $this->assertSame('', $externe[0]['vorname']);
+    }
+
+    // ------------------------------------------------------------------ Zwei Kürzel, eine Person
+
+    public function testZweiKuerzelDerselbenPersonSindErlaubt(): void
+    {
+        // Ein Kollege mit altem und neuem Kürzel, beide gleichzeitig aktiv (beide Kürzel tauchen in
+        // Kursen auf) – beide sollen auf dasselbe Moodle-Konto zeigen können.
+        $lehrer = $this->fx->benutzer('Anna', 'Lehrer (SZ)', ['lehrkraft'], 'SZ', 'sz@example.org');
+        $hj = $this->fx->halbjahr($this->fx->stufe('Q2'));
+        $kursSz = $this->fx->kurs($hj, 'D_Q2_GK1_SZ', null, 'SZ');
+        $kursAs = $this->fx->kurs($hj, 'M_Q2_GK1_AS', null, 'AS'); // altes Kürzel, noch in Kursen aktiv
+
+        StufenleitungApi::postZuordnung(['typ' => 'lehrkraft', 'lehrer_kuerzel' => 'AS', 'benutzer_id' => $lehrer]);
+        \Klausurplan\Models\Zuordnung::ordneLehrerZu($this->db, [$kursSz, $kursAs]); // wie beim Import: automatisches Matching für SZ
+
+        // SZ ordnet sich automatisch über benutzer.kuerzel zu; AS wurde manuell zugeordnet
+        $kurse = $this->fx->zeilen('SELECT kurs_kuerzel, lehrer_id FROM kurse ORDER BY kurs_kuerzel');
+        $this->assertSame([$lehrer, $lehrer], array_map('intval', array_column($kurse, 'lehrer_id')));
+
+        $zugeordnet = StufenleitungApi::getZuordnungen()['lehrkraefte_zugeordnet'];
+        $this->assertCount(2, $zugeordnet, 'beide Kürzel erscheinen als eigene Zeile');
+        $this->assertEqualsCanonicalizing(['AS', 'SZ'], array_column($zugeordnet, 'lehrer_kuerzel'));
+        $this->assertSame([$lehrer, $lehrer], array_map('intval', array_column($zugeordnet, 'lehrer_id')));
+    }
 }

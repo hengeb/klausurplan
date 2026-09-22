@@ -6,7 +6,7 @@ PHP-Webserver ohne Shell-Zugriff.
 
 **Was es kann**
 
-- GoMST-Kursexport importieren (Kurse, Teilnehmende, Fachlehrkräfte), Namen den Moodle-Konten zuordnen
+- GOMSTH-Kursexport importieren (Kurse, Teilnehmende, Fachlehrkräfte), Namen den Moodle-Konten zuordnen
   (dauerhaft gespeichert, jederzeit korrigierbar).
 - Klausurtermine anlegen: einzeln oder per Excel-Import (CSV-Vorlage je Stufe/Halbjahr), Nachschreibtermine.
 - Fachlehrkräfte tragen die Anwesenheit ein – in der Oberfläche oder per Link in einer E-Mail (ohne Login).
@@ -58,7 +58,7 @@ Empfohlene Verzeichnisstruktur – **nur `public/` darf per HTTP erreichbar sein
 
 Hochladen: `public/`, `src/`, `vendor/`, `migrations/`, `composer.json`.
 **Nicht** hochladen: `.git/`, `tests/`, `node_modules/`, `coverage/`, `package*.json`, `phpunit.xml.dist`,
-deine lokale `.env`, `*.key`, Exportdateien aus GoMST. Stelle den Document Root der Domain auf `public/`.
+deine lokale `.env`, `*.key`, Exportdateien aus GOMSTH. Stelle den Document Root der Domain auf `public/`.
 
 ### 3. Datenbank anlegen
 
@@ -114,7 +114,7 @@ Binde das Tool anschließend in Moodle an gewünschter Stelle als Aktivität/Lin
 2. *Administration → Moodle-Nutzer synchronisieren* ausführen.
 3. Unter *Benutzerverwaltung* die Rolle **Stufenleitung** an die zuständigen Personen vergeben (die Stufen wählen
    diese anschließend selbst). Bei Bedarf *Fächerbezeichnungen* anpassen.
-4. Stufenleitung: **GoMST-Import** → **Zuordnungen** prüfen → **Klausuren** anlegen (Excel-Import oder einzeln).
+4. Stufenleitung: **GOMSTH-Import** → **Zuordnungen** prüfen → **Klausuren** anlegen (Excel-Import oder einzeln).
 
 ### 8. Cronjob für die E-Mails einrichten
 
@@ -124,9 +124,10 @@ Beim Hoster einen Cronjob **stündlich** anlegen (Cron-Verwaltung im Hosting-Pan
 0 * * * * php /pfad/zum/projekt/src/Cron/erinnerungen_senden.php
 ```
 
-Das Skript versendet Anwesenheits-Mails an Fachlehrkräfte (und nach 7 Tagen einmalig eine Erinnerung) sowie die
-Übersicht an Stufenleitungen. Es liest die `.env` im Projektverzeichnis. Test: in der Klausurliste bei einer Klausur
-mit Lehrkraft das ✉️ anklicken – die Mail sollte ankommen. Fehler des Cronjobs stehen in dessen Ausgabe/Mail.
+Das Skript versendet Anwesenheits-Mails an Fachlehrkräfte: eine Erstmeldung, sobald der Klausurtermin vergangen ist,
+danach täglich eine Erinnerung, solange keine Anwesenheit erfasst ist. Es liest die `.env` im Projektverzeichnis.
+Test: in der Klausurliste bei einer Klausur mit Lehrkraft das ✉️ anklicken – die Mail sollte ankommen. Fehler des
+Cronjobs stehen in dessen Ausgabe/Mail.
 
 ---
 
@@ -151,13 +152,14 @@ mit Lehrkraft das ✉️ anklicken – die Mail sollte ankommen. Fehler des Cron
    | `002_remove_raum.sql` | entfernt das Feld „Raum“ | nur **einmal** und nur, wenn `klausuren` noch die Spalte `raum` hat (Installationen aus einem alten Stand) |
    | `003_zuordnungen_extern.sql` | dauerhafte Zuordnungen, externe Lehrkräfte, Stufenleitungs-Mails | mehrfach ausführbar; übernimmt bestehende Zuordnungen |
    | `004_verwaiste_stufen.sql` | löscht Stufen ohne Halbjahr (Altlasten in der Stufenauswahl) | mehrfach ausführbar |
+   | `005_entferne_stufenleitung_erinnerungen.sql` | entfernt die Übersichtsmail an die Stufenleitung wieder | mehrfach ausführbar |
 
    Jede neue Migration wird hier eingetragen. Notiere dir, welche Nummer bei dir zuletzt eingespielt wurde.
 4. **Prüfen:** Tool aus Moodle öffnen (Browser-Cache mit `Strg+F5` leeren, falls die Seite alt aussieht),
    Klausurliste und Zuordnungen öffnen. Bei einem weißen Bildschirm/Fehler: PHP-Error-Log des Servers ansehen.
 5. **Zurückrollen:** alte Dateien wieder hochladen und den DB-Export einspielen.
 
-Neue Schuljahre: GoMST-Export des neuen Halbjahres importieren (legt Stufe/Halbjahr an; Stufenleitungen der
+Neue Schuljahre: GOMSTH-Export des neuen Halbjahres importieren (legt Stufe/Halbjahr an; Stufenleitungen der
 Vorgängerstufe werden übernommen). Nicht mehr benötigte Halbjahre unter *Halbjahre & Kurse* löschen – dabei werden
 Klausuren und Anwesenheitsdaten dieses Halbjahres gelöscht (Datenschutz).
 

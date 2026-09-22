@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Klausurplan\Api;
 
 use Klausurplan\Auth\Session;
-use Klausurplan\Import\GomstImporter;
+use Klausurplan\Import\GomsthImporter;
 use Klausurplan\Mail\EmailTemplates;
 use Klausurplan\Mail\Mailer;
 use Klausurplan\Models\Database;
@@ -15,11 +15,11 @@ use RuntimeException;
 class StufenleitungApi
 {
     // ------------------------------------------------------------------
-    // GoMST-Import
+    // GOMSTH-Import
     // ------------------------------------------------------------------
 
     /**
-     * Verarbeitet einen GoMST-Datei-Upload (multipart/form-data, Feld "datei").
+     * Verarbeitet einen GOMSTH-Datei-Upload (multipart/form-data, Feld "datei").
      *
      * Wer die Rolle Stufenleitung hat, wird für alle importierten Stufen automatisch
      * Stufenleitung. Die dabei neu hinzugekommenen Stufen stehen in `stufenleitung_neu`
@@ -28,7 +28,7 @@ class StufenleitungApi
      * @return array{kurse: int, schueler: int, entfernt: int, halbjahre: int,
      *               stufenleitung_neu: list<array{id: int, name: string, schuljahr: string}>}
      */
-    public static function gomstImport(): array
+    public static function gomsthImport(): array
     {
         Session::requireRolle('admin', 'stufenleitung');
 
@@ -50,7 +50,7 @@ class StufenleitungApi
 
         $vorher = $istSL ? self::eigeneStufenIds($db, $benutzerId) : [];
 
-        $importer = new GomstImporter($benutzerId);
+        $importer = new GomsthImporter($benutzerId);
         $ergebnis = $importer->importiere($inhalt);
 
         $stufenIds = $ergebnis['stufen_ids'];
@@ -166,9 +166,9 @@ class StufenleitungApi
 
     /**
      * Liefert die Daten für die Zuordnungs-UI:
-     * - schueler_gomst:        GoMST-Namen ohne Moodle-Konto
-     * - schueler_moodle:       Moodle-Konten (ohne Lehrkräfte), die noch keinem GoMST-Namen zugeordnet sind
-     * - schueler_zugeordnet:   bereits zugeordnete GoMST-Namen (zum Korrigieren/Aufheben)
+     * - schueler_gomsth:        GOMSTH-Namen ohne Moodle-Konto
+     * - schueler_moodle:       Moodle-Konten (ohne Lehrkräfte), die noch keinem GOMSTH-Namen zugeordnet sind
+     * - schueler_zugeordnet:   bereits zugeordnete GOMSTH-Namen (zum Korrigieren/Aufheben)
      * - lehrkraefte_kurse:     Lehrerkürzel ohne Lehrkraft
      * - lehrkraefte_moodle:    alle Lehrkräfte (inkl. externer) mit Flag `vergeben`
      * - lehrkraefte_zugeordnet: bereits zugeordnete Kürzel (zum Korrigieren/Aufheben)
@@ -179,8 +179,8 @@ class StufenleitungApi
         Session::requireRolle('admin', 'stufenleitung');
         $db = Database::getInstance();
 
-        // Nicht zugeordnete Prüflinge – GoMST-Einträge (mit '|') und Zusatzschüler
-        $schuelerGomst = $db->query(
+        // Nicht zugeordnete Prüflinge – GOMSTH-Einträge (mit '|') und Zusatzschüler
+        $schuelerGomsth = $db->query(
             "SELECT ks.name_roh,
                     COUNT(DISTINCT ks.id)                                         AS anzahl_kurse,
                     GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ')  AS stufen
@@ -193,7 +193,7 @@ class StufenleitungApi
              ORDER BY ks.name_roh"
         )->fetchAll();
 
-        // Moodle-Konten, die noch keinem GoMST-Namen zugeordnet sind (weder aktuell noch dauerhaft)
+        // Moodle-Konten, die noch keinem GOMSTH-Namen zugeordnet sind (weder aktuell noch dauerhaft)
         $schuelerMoodle = $db->query(
             "SELECT b.id, b.vorname, b.nachname, b.stufe
              FROM benutzer b
@@ -249,7 +249,7 @@ class StufenleitungApi
 
         // Alle Lehrkräfte (auch externe); `vergeben` = hat Kurse oder eine dauerhafte Kürzel-Zuordnung
         $lehrkraefteMoodle = $db->query(
-            "SELECT b.id, b.vorname, b.nachname, b.kuerzel, b.extern,
+            "SELECT b.id, b.vorname, b.nachname, b.kuerzel, b.extern, b.email,
                     (EXISTS (SELECT 1 FROM kurse k WHERE k.lehrer_id = b.id)
                      OR EXISTS (SELECT 1 FROM lehrer_zuordnungen z WHERE z.benutzer_id = b.id)) AS vergeben
              FROM benutzer b
@@ -261,21 +261,21 @@ class StufenleitungApi
         $lehrkraefteZugeordnet = $db->query(
             "SELECT k.lehrer_kuerzel,
                     k.lehrer_id,
-                    b.vorname, b.nachname, b.kuerzel, b.extern,
+                    b.vorname, b.nachname, b.kuerzel, b.extern, b.email,
                     COUNT(DISTINCT k.id)                AS anzahl_kurse,
                     MAX(z.lehrer_kuerzel IS NOT NULL)   AS manuell
              FROM kurse k
              JOIN benutzer b ON b.id = k.lehrer_id
              LEFT JOIN lehrer_zuordnungen z ON z.lehrer_kuerzel = k.lehrer_kuerzel
              WHERE k.lehrer_kuerzel IS NOT NULL AND k.lehrer_id IS NOT NULL
-             GROUP BY k.lehrer_kuerzel, k.lehrer_id, b.vorname, b.nachname, b.kuerzel, b.extern"
+             GROUP BY k.lehrer_kuerzel, k.lehrer_id, b.vorname, b.nachname, b.kuerzel, b.extern, b.email"
         )->fetchAll();
 
         // … und gespeicherte Kürzel-Zuordnungen ohne aktuelle Kurse
         $lehrkraefteGespeichert = $db->query(
             "SELECT z.lehrer_kuerzel,
                     z.benutzer_id AS lehrer_id,
-                    b.vorname, b.nachname, b.kuerzel, b.extern,
+                    b.vorname, b.nachname, b.kuerzel, b.extern, b.email,
                     0 AS anzahl_kurse, 1 AS manuell
              FROM lehrer_zuordnungen z
              JOIN benutzer b ON b.id = z.benutzer_id
@@ -287,7 +287,7 @@ class StufenleitungApi
             => strnatcasecmp($x['lehrer_kuerzel'], $y['lehrer_kuerzel']));
 
         return [
-            'schueler_gomst'         => $schuelerGomst,
+            'schueler_gomsth'         => $schuelerGomsth,
             'schueler_moodle'        => $schuelerMoodle,
             'schueler_zugeordnet'    => $schuelerZugeordnet,
             'lehrkraefte_kurse'      => $lehrkraefteKurse,
@@ -299,7 +299,7 @@ class StufenleitungApi
 
     /**
      * Alle Moodle-Konten ohne Lehrkraft-Rolle (für das Korrigieren einer Zuordnung).
-     * `vergeben` = bereits einem GoMST-Namen zugeordnet.
+     * `vergeben` = bereits einem GOMSTH-Namen zugeordnet.
      */
     public static function getMoodleSchueler(): array
     {
@@ -495,23 +495,33 @@ class StufenleitungApi
         return ['ok' => true];
     }
 
-    /** @return array{0: string, 1: string, 2: string} [vorname, nachname, email] */
+    /**
+     * Nachname ist Pflicht, Vorname und E-Mail sind optional: nicht jede externe Lehrkraft
+     * hat einen bekannten Vornamen, und ohne E-Mail wird eben keine Erinnerungsmail
+     * verschickt – der Name lässt sich trotzdem korrekt anzeigen.
+     *
+     * @return array{0: string, 1: string, 2: ?string} [vorname, nachname, email]
+     */
     private static function validiereExterneLehrkraft(array $body): array
     {
         $vorname  = trim((string) ($body['vorname']  ?? ''));
         $nachname = trim((string) ($body['nachname'] ?? ''));
         $email    = trim((string) ($body['email']    ?? ''));
 
-        if ($vorname === '' || $nachname === '' || mb_strlen($vorname) > 100 || mb_strlen($nachname) > 100) {
+        if ($nachname === '' || mb_strlen($nachname) > 100) {
             http_response_code(400);
-            throw new RuntimeException('Vor- und Nachname sind erforderlich (max. 100 Zeichen).');
+            throw new RuntimeException('Nachname ist erforderlich (max. 100 Zeichen).');
         }
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 255) {
+        if (mb_strlen($vorname) > 100) {
             http_response_code(400);
-            throw new RuntimeException('Bitte eine gültige E-Mail-Adresse angeben.');
+            throw new RuntimeException('Vorname ist zu lang (max. 100 Zeichen).');
+        }
+        if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 255)) {
+            http_response_code(400);
+            throw new RuntimeException('Bitte eine gültige E-Mail-Adresse angeben oder das Feld leer lassen.');
         }
 
-        return [$vorname, $nachname, $email];
+        return [$vorname, $nachname, $email === '' ? null : $email];
     }
 
     // ------------------------------------------------------------------
@@ -789,11 +799,11 @@ class StufenleitungApi
     }
 
     // ------------------------------------------------------------------
-    // Prüflinge eines Kurses (GoMST + manuell hinzugefügte)
+    // Prüflinge eines Kurses (GOMSTH + manuell hinzugefügte)
     // ------------------------------------------------------------------
 
     /**
-     * Alle Prüflinge eines Kurses – aus GoMST und manuell hinzugefügte.
+     * Alle Prüflinge eines Kurses – aus GOMSTH und manuell hinzugefügte.
      * Liefert aufgelöste Namen wenn schueler_id gesetzt ist.
      *
      * @return array<array{id: int, name_roh: string, kursart: string|null, schueler_id: int|null, vorname: string|null, nachname: string|null, ist_zusatz: int}>
@@ -868,7 +878,7 @@ class StufenleitungApi
 
         $ksId = (int) $db->lastInsertId();
 
-        // Gespeicherte Zuordnung bzw. automatisches Namensmatching (wie GoMST-Import)
+        // Gespeicherte Zuordnung bzw. automatisches Namensmatching (wie GOMSTH-Import)
         $schuelerId = Zuordnung::ermittleSchuelerId($db, $name);
         if ($schuelerId !== null) {
             $db->prepare('UPDATE kurs_schueler SET schueler_id = ? WHERE id = ?')
@@ -880,7 +890,7 @@ class StufenleitungApi
 
     /**
      * Löscht einen manuell hinzugefügten Prüfling aus einem Kurs.
-     * Schlägt fehl wenn der Eintrag GoMST-Format hat (enthält '|') oder nicht zum Kurs gehört.
+     * Schlägt fehl wenn der Eintrag GOMSTH-Format hat (enthält '|') oder nicht zum Kurs gehört.
      */
     public static function deleteZusatzSchuelerAusKurs(int $kursId, int $ksId): array
     {

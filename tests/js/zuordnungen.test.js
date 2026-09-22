@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { starte, warten, ereignis, SL } = require('./helfer');
 
 const zuordnungen = () => ({
-    schueler_gomst: [{ name_roh: 'Unbekannt|Uwe', anzahl_kurse: 2, stufen: 'Q2' }],
+    schueler_gomsth: [{ name_roh: 'Unbekannt|Uwe', anzahl_kurse: 2, stufen: 'Q2' }],
     schueler_moodle: [{ id: 4, vorname: 'Tom', nachname: 'Frei', stufe: 'Q2' }],
     schueler_zugeordnet: [
         { name_roh: 'Mustermann|Max', schueler_id: 1, vorname: 'Max', nachname: 'Mustermann', moodle_stufe: 'Q2', anzahl_kurse: 1, stufen: 'Q2', manuell: 1 },

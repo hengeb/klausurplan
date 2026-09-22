@@ -15,7 +15,7 @@ const fixtures = () => ({
     'GET /stufenleitung/meine-stufen': stufen,
     'PUT /stufenleitung/meine-stufen/*': { ok: true },
     'DELETE /stufenleitung/meine-stufen/*': { ok: true },
-    'POST /stufenleitung/gomst-import': {
+    'POST /stufenleitung/gomsth-import': {
         halbjahre: 1, kurse: 3, schueler: 20, entfernt: 0,
         stufenleitung_neu: [{ id: 3, name: 'EF', schuljahr: '2026/2027' }],
     },
@@ -96,7 +96,7 @@ test('Dialog: Fehler beim Speichern setzt den Haken zurück und zeigt die Meldun
 
 test('Import zeigt neu erlangte Zuständigkeit und erlaubt Abgabe per Klick', async () => {
     const { w, d, calls } = await starte('import', SL, fixtures());
-    const eingabe = d.querySelector('#gomst-datei');
+    const eingabe = d.querySelector('#gomsth-datei');
     Object.defineProperty(eingabe, 'files', { value: [new w.File(['x'], 'export.dat')] });
     ereignis(w, eingabe, 'change');
     calls.length = 0;
@@ -116,11 +116,11 @@ test('Import zeigt neu erlangte Zuständigkeit und erlaubt Abgabe per Klick', as
 
 test('Import ohne neue Zuständigkeit zeigt keinen Hinweis; Import-Button erst mit Datei aktiv', async () => {
     const fx = fixtures();
-    fx['POST /stufenleitung/gomst-import'] = { halbjahre: 1, kurse: 1, schueler: 1, entfernt: 0, stufenleitung_neu: [] };
+    fx['POST /stufenleitung/gomsth-import'] = { halbjahre: 1, kurse: 1, schueler: 1, entfernt: 0, stufenleitung_neu: [] };
     const { w, d } = await starte('import', SL, fx);
     assert.equal(d.querySelector('#import-btn').disabled, true);
 
-    const eingabe = d.querySelector('#gomst-datei');
+    const eingabe = d.querySelector('#gomsth-datei');
     Object.defineProperty(eingabe, 'files', { value: [new w.File(['x'], 'export.dat')] });
     ereignis(w, eingabe, 'change');
     assert.equal(d.querySelector('#import-btn').disabled, false);

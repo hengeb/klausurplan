@@ -92,7 +92,7 @@ function renderNav() {
 
     if (hatRolle('admin', 'stufenleitung')) {
         links.push(
-            { hash: 'import',      label: 'GoMST-Import' },
+            { hash: 'import',      label: 'GOMSTH-Import' },
             { hash: 'zuordnungen', label: 'Zuordnungen' },
             { hash: 'halbjahre',   label: 'Halbjahre & Kurse' },
         );
@@ -138,7 +138,7 @@ async function viewStart(el) {
             ${hatRolle('admin', 'stufenleitung') ? `
             <a href="#import" class="kachel">
                 <span class="kachel-icon">📥</span>
-                <span>GoMST importieren</span>
+                <span>GOMSTH importieren</span>
             </a>
             <a href="#zuordnungen" class="kachel">
                 <span class="kachel-icon">🔗</span>
@@ -234,7 +234,7 @@ async function zeigeMeineStufenDialog(nachAenderung) {
     }
 
     if (stufen.length === 0) {
-        listeEl.innerHTML = '<p class="hinweis">Es gibt noch keine Stufen. Importiere zuerst eine GoMST-Datei.</p>';
+        listeEl.innerHTML = '<p class="hinweis">Es gibt noch keine Stufen. Importiere zuerst eine GOMSTH-Datei.</p>';
         return;
     }
 
@@ -273,7 +273,7 @@ async function zeigeMeineStufenDialog(nachAenderung) {
 }
 
 // ---------------------------------------------------------------------------
-// View: GoMST-Import
+// View: GOMSTH-Import
 // ---------------------------------------------------------------------------
 
 async function viewImport(el) {
@@ -283,16 +283,16 @@ async function viewImport(el) {
     }
 
     el.innerHTML = `
-        <h2>GoMST-Import</h2>
+        <h2>GOMSTH-Import</h2>
         <div class="karte">
             <p>
-                Bitte lade die GoMST-Exportdatei (.dat) hoch.
+                Bitte lade die GOMSTH-Exportdatei (.dat) hoch.
                 Es werden nur klausurrelevante Kursarten importiert
                 (GKS, LK1, LK2, AB3, AB4). GKM und ZK werden übersprungen.
             </p>
             <div class="formular-zeile">
-                <label for="gomst-datei" class="btn btn-sekundaer">Datei auswählen</label>
-                <input type="file" id="gomst-datei" accept=".dat,.txt,.csv" style="display:none">
+                <label for="gomsth-datei" class="btn btn-sekundaer">Datei auswählen</label>
+                <input type="file" id="gomsth-datei" accept=".dat,.txt,.csv" style="display:none">
                 <span id="datei-name" class="datei-name-text">Keine Datei ausgewählt</span>
             </div>
             <button id="import-btn" class="btn" disabled>Importieren</button>
@@ -300,7 +300,7 @@ async function viewImport(el) {
         </div>
     `;
 
-    const dateiInput = el.querySelector('#gomst-datei');
+    const dateiInput = el.querySelector('#gomsth-datei');
     const dateiNameEl = el.querySelector('#datei-name');
     const importBtn = el.querySelector('#import-btn');
     const ergebnisEl = el.querySelector('#import-ergebnis');
@@ -323,7 +323,7 @@ async function viewImport(el) {
             const formData = new FormData();
             formData.append('datei', datei);
 
-            const res = await apiFetch('/stufenleitung/gomst-import', {
+            const res = await apiFetch('/stufenleitung/gomsth-import', {
                 method: 'POST',
                 body: formData,
             });
@@ -412,15 +412,15 @@ async function ladeZuordnungen(el) {
 }
 
 /**
- * Prüft ob ein Moodle-Nutzer zur Stufe eines GoMST-Eintrags passt.
+ * Prüft ob ein Moodle-Nutzer zur Stufe eines GOMSTH-Eintrags passt.
  * - Kein Moodle-Stufe → immer anzeigen (unbekannt = nicht ausschließen)
- * - GoMST-Stufe beginnt mit Zahl (z.B. "9a", "10b") → Moodle-Stufe muss mit
+ * - GOMSTH-Stufe beginnt mit Zahl (z.B. "9a", "10b") → Moodle-Stufe muss mit
  *   derselben führenden Zahl beginnen (z.B. "9b", "10c" passen auch)
  * - Sonst (z.B. "Q2", "EF") → exakter Vergleich
  */
-function matchesStufe(moodleStufe, gomstStufen) {
+function matchesStufe(moodleStufe, gomsthStufen) {
     if (!moodleStufe) return true;
-    const stufen = (gomstStufen ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    const stufen = (gomsthStufen ?? '').split(',').map(s => s.trim()).filter(Boolean);
     if (stufen.length === 0) return true;
     for (const stufe of stufen) {
         const numPräfix = stufe.match(/^(\d+)/);
@@ -438,17 +438,20 @@ function nachnameOhneKuerzel(nachname, kuerzel) {
     return kuerzel ? nachname.replace(/\s*\([^)]+\)$/, '') : nachname;
 }
 
+/** Klartext (kein HTML) – für <option>-Texte und escHtml()-Aufrufe durch den Aufrufer. */
 function lehrkraftAnzeige(l, mitVergeben = false) {
-    const nachname = nachnameOhneKuerzel(l.nachname, l.kuerzel);
-    const kuerzel  = l.kuerzel ? ` (${l.kuerzel})` : '';
-    const extern   = l.extern == 1 ? ' – extern' : '';
-    const vergeben = mitVergeben && l.vergeben == 1 ? ' – bereits zugeordnet' : '';
-    return `${nachname}, ${l.vorname}${kuerzel}${extern}${vergeben}`;
+    const nachname   = nachnameOhneKuerzel(l.nachname, l.kuerzel);
+    const vorname    = l.vorname ? `, ${l.vorname}` : '';
+    const kuerzel    = l.kuerzel ? ` (${l.kuerzel})` : '';
+    const extern     = l.extern == 1 ? ' – extern' : '';
+    const vergeben   = mitVergeben && l.vergeben == 1 ? ' – bereits zugeordnet' : '';
+    const keineEmail = !l.email ? ' – keine E-Mail' : '';
+    return `${nachname}${vorname}${kuerzel}${extern}${vergeben}${keineEmail}`;
 }
 
 function renderZuordnungenView(el, daten) {
     const {
-        schueler_gomst:         sGomst,
+        schueler_gomsth:         sGomsth,
         schueler_moodle:        sMoodle,
         schueler_zugeordnet:    sZugeordnet,
         lehrkraefte_kurse:      lKurseRaw,
@@ -461,7 +464,7 @@ function renderZuordnungenView(el, daten) {
     const lKurse = lKurseRaw.filter(k => !/\d$/.test(k.lehrer_kuerzel));
     const lFrei  = lMoodle.filter(l => l.vergeben != 1);
 
-    const anzUnzugeordnetS = sGomst.length;
+    const anzUnzugeordnetS = sGomsth.length;
     const anzUnzugeordnetL = lKurse.filter(k => !lFrei.some(l => l.kuerzel === k.lehrer_kuerzel)).length;
 
     const aktiv = zuordnungenZustand.tab;
@@ -485,7 +488,7 @@ function renderZuordnungenView(el, daten) {
         </div>
 
         <div id="tab-schueler" class="tab-inhalt ${aktiv === 'schueler' ? '' : 'versteckt'}">
-            ${renderSchuelerZuordnung(sGomst, sMoodle)}
+            ${renderSchuelerZuordnung(sGomsth, sMoodle)}
             ${renderSchuelerZugeordnet(sZugeordnet)}
         </div>
         <div id="tab-lehrkraefte" class="tab-inhalt ${aktiv === 'lehrkraefte' ? '' : 'versteckt'}">
@@ -572,7 +575,8 @@ function renderZuordnungenView(el, daten) {
         } else if (btn.classList.contains('btn-extern-loeschen')) {
             const ext = externe.find(x => x.id == btn.dataset.id);
             const kurse = parseInt(ext?.anzahl_kurse) || 0;
-            if (!confirm(`Externe Lehrkraft „${ext.vorname} ${ext.nachname}" wirklich löschen?` +
+            const extName = [ext.vorname, ext.nachname].filter(Boolean).join(' ');
+            if (!confirm(`Externe Lehrkraft „${extName}" wirklich löschen?` +
                 (kurse > 0 ? `\n\n${kurse} Kurs(e) haben danach keine Lehrkraft mehr.` : ''))) return;
             btn.disabled = true;
             try {
@@ -693,12 +697,12 @@ function starteKorrekturLehrkraft(zeile, lehrkraefte, neuLaden) {
     });
 }
 
-function renderSchuelerZuordnung(sGomst, sMoodle) {
-    if (sGomst.length === 0) {
+function renderSchuelerZuordnung(sGomsth, sMoodle) {
+    if (sGomsth.length === 0) {
         return '<div class="karte"><p class="ok-text">✓ Alle Schüler*innen sind zugeordnet.</p></div>';
     }
 
-    const zeilen = sGomst.map(ks => {
+    const zeilen = sGomsth.map(ks => {
         const nameAnzeige = parseZeigeNameRoh(ks.name_roh);
         const nameRohAttr = escHtml(ks.name_roh);
 
@@ -728,13 +732,13 @@ function renderSchuelerZuordnung(sGomst, sMoodle) {
     return `
         <div class="tabelle-wrapper">
             <p class="tabelle-hinweis">
-                ${sGomst.length} Schüler*innen aus GoMST ohne Moodle-Konto-Zuordnung.
+                ${sGomsth.length} Schüler*innen aus GOMSTH ohne Moodle-Konto-Zuordnung.
                 Wähle das passende Moodle-Konto aus – die Zuordnung gilt für alle Kurse der Person.
             </p>
             <table class="zuordnungs-tabelle">
                 <thead>
                     <tr>
-                        <th>GoMST-Name</th>
+                        <th>GOMSTH-Name</th>
                         <th>Stufe(n)</th>
                         <th>Kurse</th>
                         <th>Moodle-Konto</th>
@@ -781,7 +785,7 @@ function renderSchuelerZugeordnet(liste) {
             <table class="zuordnungs-tabelle">
                 <thead>
                     <tr>
-                        <th>GoMST-Name</th>
+                        <th>GOMSTH-Name</th>
                         <th>Stufe(n)</th>
                         <th>Kurse</th>
                         <th>Moodle-Konto</th>
@@ -888,9 +892,9 @@ function renderLehrkraefteZugeordnet(liste) {
 function renderExterneLehrkraefte(externe) {
     const zeilen = externe.map(x => `
         <tr>
-            <td>${escHtml(x.nachname)}, ${escHtml(x.vorname)}</td>
+            <td>${nameKommaFormat(x.nachname, x.vorname)}</td>
             <td>${escHtml(x.kuerzel ?? '')}</td>
-            <td>${escHtml(x.email ?? '')}</td>
+            <td>${x.email ? escHtml(x.email) : '<span class="fehlend">–</span>'}${emailFehltHinweis(x.email)}</td>
             <td>${x.anzahl_kurse}</td>
             <td>
                 <button class="btn-icon btn-extern-bearbeiten" data-id="${x.id}" title="Bearbeiten" type="button">✏️</button>
@@ -929,9 +933,12 @@ function zeigeExterneLehrkraftDialog(vorhandene, kuerzelVorbelegung, nachSpeiche
     overlay.innerHTML = `
         <div class="dialog">
             <h3>${bearbeiten ? 'Externe Lehrkraft bearbeiten' : 'Externe Lehrkraft anlegen'}</h3>
-            <p class="hinweis">Für Lehrkräfte ohne Moodle-Konto. Die E-Mail-Adresse erhält die Anwesenheits-Links.</p>
+            <p class="hinweis">
+                Für Lehrkräfte ohne Moodle-Konto. Ohne E-Mail-Adresse werden keine Anwesenheits-Mails
+                verschickt, der Name erscheint aber wie gewohnt in den Listen.
+            </p>
             <div class="formular-gruppe">
-                <label for="ext-vorname">Vorname *</label>
+                <label for="ext-vorname">Vorname</label>
                 <input type="text" id="ext-vorname" maxlength="100" value="${escHtml(vorhandene?.vorname ?? '')}">
             </div>
             <div class="formular-gruppe">
@@ -939,13 +946,13 @@ function zeigeExterneLehrkraftDialog(vorhandene, kuerzelVorbelegung, nachSpeiche
                 <input type="text" id="ext-nachname" maxlength="100" value="${escHtml(vorhandene?.nachname ?? '')}">
             </div>
             <div class="formular-gruppe">
-                <label for="ext-kuerzel">Kürzel * <span style="font-weight:normal;font-size:.85em">(wie in GoMST, z.B. „SZ“)</span></label>
+                <label for="ext-kuerzel">Kürzel * <span style="font-weight:normal;font-size:.85em">(wie in GOMSTH, z.B. „SZ“)</span></label>
                 <input type="text" id="ext-kuerzel" maxlength="20"
                        value="${escHtml(vorhandene?.kuerzel ?? kuerzelVorbelegung ?? '')}"
                        ${bearbeiten ? 'disabled' : ''}>
             </div>
             <div class="formular-gruppe">
-                <label for="ext-email">E-Mail-Adresse *</label>
+                <label for="ext-email">E-Mail-Adresse</label>
                 <input type="email" id="ext-email" maxlength="255" value="${escHtml(vorhandene?.email ?? '')}">
             </div>
             <div class="dialog-aktionen">
@@ -1008,7 +1015,7 @@ async function viewHalbjahre(el) {
             <h2>Halbjahre & Kurse</h2>
             ${anlegenBtn ? `<div style="margin-bottom:1rem">${anlegenBtn}</div>` : ''}
             <div class="karte">
-                <p>Noch keine Daten importiert. <a href="#import">GoMST-Datei importieren →</a></p>
+                <p>Noch keine Daten importiert. <a href="#import">GOMSTH-Datei importieren →</a></p>
             </div>`;
         el.querySelector('#btn-hj-anlegen')?.addEventListener('click', () => zeigeHalbjahrAnlegenDialog(el));
         return;
@@ -1277,7 +1284,7 @@ async function zeigeKursHinzufuegenDialog(viewEl, hjId, hjLabel) {
         const nachname = lk.nachname.replace(/\s*\([^)]+\)$/, '');
         const kuerzel  = lk.kuerzel ? ` (${escHtml(lk.kuerzel)})` : '';
         const extern   = lk.extern == 1 ? ' – extern' : '';
-        return `<option value="${lk.id}">${escHtml(nachname)}, ${escHtml(lk.vorname)}${kuerzel}${extern}</option>`;
+        return `<option value="${lk.id}">${nameKommaFormat(nachname, lk.vorname)}${kuerzel}${extern}</option>`;
     }).join('');
 
     const overlay = document.createElement('div');
@@ -1363,7 +1370,7 @@ async function zeigeKursHinzufuegenDialog(viewEl, hjId, hjLabel) {
 
 function renderKursZeile(k) {
     const lehrkraft = k.lehrer_id
-        ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}${k.lehrer_extern == 1 ? ' <small>(extern)</small>' : ''}`
+        ? `${nameKommaFormat(k.lehrer_nachname, k.lehrer_vorname)}${k.lehrer_extern == 1 ? ' <small>(extern)</small>' : ''}`
         : k.lehrer_kuerzel
         ? `<span class="fehlend">${escHtml(k.lehrer_kuerzel)} (nicht zugeordnet)</span>`
         : '<span class="fehlend">–</span>';
@@ -1835,7 +1842,7 @@ function renderKlausurZeile(k) {
     const uhrzeit = k.termin_uhrzeit  ? k.termin_uhrzeit.substring(0, 5)  : '–';
     const dauer   = k.dauer_minuten   ? `${k.dauer_minuten} min`          : '–';
     const lk = k.lehrer_id
-        ? `${escHtml(k.lehrer_nachname)}, ${escHtml(k.lehrer_vorname)}${k.lehrer_extern == 1 ? ' <small>(extern)</small>' : ''}`
+        ? `${nameKommaFormat(k.lehrer_nachname, k.lehrer_vorname)}${k.lehrer_extern == 1 ? ' <small>(extern)</small>' : ''}`
         : `<span class="fehlend">${escHtml(k.lehrer_kuerzel ?? '–')}</span>`;
 
     const aktionen = [];
@@ -1931,7 +1938,7 @@ async function ladeKlausurNeuFormular(el, nachSpeichern) {
 
 function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
     if (kurse.length === 0) {
-        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">GoMST-Datei importieren →</a></p></div>';
+        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">GOMSTH-Datei importieren →</a></p></div>';
         return;
     }
 
@@ -2057,7 +2064,7 @@ async function ladePasteImport(el, nachImport) {
     }
 
     if (kurse.length === 0) {
-        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">GoMST-Datei importieren →</a></p></div>';
+        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">GOMSTH-Datei importieren →</a></p></div>';
         return;
     }
 
@@ -2806,7 +2813,7 @@ function formatDatum(str) {
 
 /**
  * Parst einen name_roh-Wert für die Anzeige und gibt "Nachname, Vorname" zurück.
- * Formate: "Nachname|Vorname" (GoMST), "Nachname, Vorname" (manuelle Eingabe),
+ * Formate: "Nachname|Vorname" (GOMSTH), "Nachname, Vorname" (manuelle Eingabe),
  *          "Vorname Nachname" (ohne Komma → erstes Wort = Vorname).
  */
 function parseZeigeNameRoh(nameRoh) {
@@ -2832,6 +2839,18 @@ function escHtml(str) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+/** "Nachname, Vorname" – ohne Komma, wenn kein Vorname hinterlegt ist (z.B. externe Lehrkraft ohne Vornamen). */
+function nameKommaFormat(nachname, vorname) {
+    const n = escHtml(nachname ?? '');
+    const v = (vorname ?? '').trim();
+    return v ? `${n}, ${escHtml(v)}` : n;
+}
+
+/** Kleiner Warnhinweis, wenn keine E-Mail-Adresse hinterlegt ist (z.B. an einer Lehrkraft in einer Liste). */
+function emailFehltHinweis(email) {
+    return email ? '' : ' <span class="fehlend" title="Keine E-Mail-Adresse hinterlegt – kann keine Anwesenheits-Mails erhalten">✉️ fehlt</span>';
 }
 
 // ---------------------------------------------------------------------------
@@ -2863,7 +2882,7 @@ async function viewAdmin(el) {
         </div>
         <div class="karte">
             <h3>Fächerbezeichnungen</h3>
-            <p>Zuordnung von Fachkürzeln (wie in GoMST) zu lesbaren Bezeichnungen.</p>
+            <p>Zuordnung von Fachkürzeln (wie in GOMSTH) zu lesbaren Bezeichnungen.</p>
             <div id="faecher-container"></div>
         </div>
     `;
@@ -3256,7 +3275,7 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
         const extern = b.extern == 1;
         return `
         <tr data-id="${b.id}">
-            <td>${escHtml(b.nachname)}, ${escHtml(b.vorname)}${extern ? ' <small>(extern)</small>' : ''}</td>
+            <td>${nameKommaFormat(b.nachname, b.vorname)}${extern ? ' <small>(extern)</small>' : ''}</td>
             <td class="td-rollen">${badges}</td>
             <td>
                 ${extern ? '' : `<button class="btn-icon btn-rollen-bearbeiten"
@@ -3307,7 +3326,7 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
                     </div>
                     <p class="hinweis" id="sl-stufen-hinweis" style="${rArr.includes('stufenleitung') ? '' : 'display:none'}">
                         Für welche Stufen eine Stufenleitung zuständig ist, verwaltet sie selbst
-                        (auf der Übersichtsseite unter „Meine Stufen“ und automatisch beim GoMST-Import).
+                        (auf der Übersichtsseite unter „Meine Stufen“ und automatisch beim GOMSTH-Import).
                     </p>
                     <div class="dialog-aktionen">
                         <button class="btn" id="rollen-speichern">Speichern</button>

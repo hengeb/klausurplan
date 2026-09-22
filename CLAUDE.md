@@ -39,7 +39,7 @@ DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [R
   nie lesen, ausgeben oder in Tests verwenden.**
 - **Neuer/geänderter Code bekommt Tests.** Unit-Tests prüfen Logik und *welche* Statements gesendet werden;
   ob das SQL stimmt, prüfen nur die Integrationstests → SQL-Änderungen immer dort absichern.
-- Stand: 339 PHP-Unit-, 87 Integrations-, 38 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
+- Stand: 340 PHP-Unit-, 89 Integrations-, 38 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
   ≈ 99,85 % (offen nur `exit`, private Konstruktoren). Nicht abgedeckt: `public/*.php`-Einstiegsskripte, `setup.php`, `bin/`.
 - Test-Nahtstellen im Produktivcode (nicht entfernen): `Support\Prozess::beenden()` statt `exit`,
   `Database::setInstance()`, `Router::jsonBody($roh)`, `MoodleApi::alleNutzer()/get()` (protected).
@@ -63,7 +63,7 @@ public/                    Document Root
 src/
   Api/                     Router, AdminApi, StufenleitungApi, LehrkraftApi, AnwesenheitApi, SchuelerApi, MeController
   Auth/                    LtiHandler (Launch, Nutzer-Sync), Session (Rollenprüfung), MoodleApi (REST-Nutzerimport)
-  Import/                  GomstImporter, KlausurPasteParser
+  Import/                  GomsthImporter, KlausurPasteParser
   Mail/                    Mailer (PHPMailer/SMTP), EmailTemplates
   Models/                  Database (PDO-Singleton), Zuordnung (dauerhafte Zuordnungen + Matching)
   Support/Prozess.php      zentrales Beenden der Anfrage (Test-Nahtstelle für exit)
@@ -79,13 +79,16 @@ Es gibt keine globalen Variablen außer dem DB-Singleton.
 ## Rollen & Rechte
 
 Rollen (`rollen`-Tabelle, mehrere je Person möglich): `admin`, `stufenleitung`, `lehrkraft`, `schueler`.
-Sie stehen in der PHP-Session (Änderung wirkt erst nach neuem Login). Wer sich in Moodle als
-Systemadministrator*in anmeldet, wird automatisch `admin` (Bootstrapping); neue Nutzer*innen starten als `schueler`.
+Sie stehen in der PHP-Session (Änderung wirkt erst nach neuem Login). Wer in Moodle Systemadministrator*in oder
+**Manager** ist, bekommt bei **jedem** Login automatisch die Rolle `admin` im Tool (`LtiHandler::onLaunch`,
+`isAdmin() || isManager()`) – das synchronisiert nur hinzu, nie weg: eine manuell (über die Benutzerverwaltung)
+vergebene oder entzogene Admin-Rolle für Personen ohne diese Moodle-Rolle bleibt unangetastet. Neue Nutzer*innen
+starten als `schueler`.
 
 | Aktion | admin | stufenleitung | lehrkraft | schueler |
 |---|:---:|:---:|:---:|:---:|
 | Rollen zuweisen, Fächer pflegen, Moodle-Sync | ✓ | – | – | – |
-| GoMST importieren, Zuordnungen, externe Lehrkräfte | ✓ | ✓ (alle Stufen) | – | – |
+| GOMSTH importieren, Zuordnungen, externe Lehrkräfte | ✓ | ✓ (alle Stufen) | – | – |
 | Halbjahre/Kurse anlegen, Klausuren anlegen/ändern/löschen, Nachschreibtermine | ✓ | ✓ (**alle** Stufen) | – | – |
 | Anwesenheit eintragen | ✓ | ✓ | nur eigene Kurse | – |
 | Entschuldigen | ✓ | ✓ | – | – |
@@ -94,12 +97,12 @@ Systemadministrator*in anmeldet, wird automatisch `admin` (Bootstrapping); neue 
 
 **Zuständigkeit der Stufenleitung** (`stufenleitungen`): Wer die Rolle hat, verwaltet selbst, für welche Stufen
 sie/er zuständig ist („Meine Stufen“, `GET/PUT/DELETE /api/stufenleitung/meine-stufen[/{id}]`) – nie der Admin.
-Es kann keine Stufe zugewiesen sein. Beim GoMST-Import wird man automatisch für die importierten Stufen
+Es kann keine Stufe zugewiesen sein. Beim GOMSTH-Import wird man automatisch für die importierten Stufen
 zuständig (Antwort `stufenleitung_neu`, im UI per Klick abgebbar; Admin ohne SL-Rolle: nicht). Eine neue
 Stufe erbt die Zuständigen der Vorgängerstufe (EF←Q2, Q1←EF, Q2←Q1 des Vorjahres). Die Zuständigkeit steuert:
 1. die Standard-Klausurliste (`GET /api/klausuren`; `?alle=1` zeigt alle Stufen; eine Liste je Stufe/Halbjahr),
 2. Vorauswahl von Stufe/Halbjahr beim Anlegen und im Excel-Import,
-3. den ✉️-Button und die **Übersichtsmail an die Stufenleitung** (siehe E-Mail).
+3. den ✉️-Button (nur für eigene Stufen sichtbar).
 Entzug der Rolle `stufenleitung` löscht die Zuordnungen. Als vorhanden gelten nur Stufen **mit Halbjahr**
 („Meine Stufen“, Halbjahr-Vorschlag, Admin-Stufenliste); mit dem letzten Halbjahr wird die Stufe gelöscht und per
 `ON DELETE CASCADE` auch ihre `stufenleitungen`-Zuordnungen (Altlasten räumt Migration 004 auf).
@@ -110,11 +113,12 @@ Namen deutsch, snake_case, Tabellen im Plural.
 - `benutzer` (`moodle_id` eindeutig, `kuerzel`, `email`, `stufe`, `extern`), `rollen`.
 - `stufen` (name + schuljahr) → `halbjahre` (stufe, abschnitt 1/2) → `kurse` (kurs_kuerzel eindeutig **je Halbjahr**,
   kursart `LK|GK`, `lehrer_kuerzel`, `lehrer_id`, `anzeigename`) → `kurs_schueler` (`name_roh` = „Nachname|Vorname“,
-  `schueler_id`, GoMST-`kursart`) und `klausuren` (klausur_nr, termin_datum/-uhrzeit, dauer_minuten; alles außer Kurs nullable).
+  `schueler_id`, GOMSTH-`kursart`) und `klausuren` (klausur_nr, termin_datum/-uhrzeit, dauer_minuten; alles außer Kurs nullable).
 - `anwesenheiten` (status `anwesend|fehlend|ausstehend`, `entschuldigt` NULL=offen/1/0), `nachschreibtermine`,
   `nachschreib_zuordnungen` (M:N Klausur↔Termin), `nachschreib_anwesenheiten`.
-- `email_benachrichtigungen` (Token, typ `erstmeldung|erinnerung`, `beantwortet_am`), `stufenleitung_erinnerungen`.
-- `schueler_zuordnungen` / `lehrer_zuordnungen`: **dauerhafte** Zuordnung GoMST-Name/Kürzel → Konto (siehe unten).
+- `email_benachrichtigungen` (Token, typ `erstmeldung|erinnerung`, `beantwortet_am`; pro Klausur beliebig viele
+  `erinnerung`-Zeilen, da täglich erinnert wird).
+- `schueler_zuordnungen` / `lehrer_zuordnungen`: **dauerhafte** Zuordnung GOMSTH-Name/Kürzel → Konto (siehe unten).
 - `fach_bezeichnungen` (Kürzel → Name, vom Admin pflegbar), `lti2_*` (LTI-Bibliothek).
 - Kein Raum-Feld (bewusst entfernt).
 
@@ -125,7 +129,7 @@ eintragen**. Tests: `SchemaMigrationTest`.
 
 ## Kernlogik
 
-**GoMST-Import** (`Import/GomstImporter`): Pipe-getrennt, UTF-8 mit BOM, CRLF. Spalten `Nachname, Vorname, Fach,
+**GOMSTH-Import** (`Import/GomsthImporter`): Pipe-getrennt, UTF-8 mit BOM, CRLF. Spalten `Nachname, Vorname, Fach,
 Fachlehrer, Kursart, Kurs, Jahrgang, Abschnitt, Jahr`. Nur `GKS, LK1, LK2, AB3, AB4` (GKM/ZK übersprungen).
 Legt Stufe/Halbjahr/Kurs/Prüflinge an bzw. aktualisiert; Prüflinge, die nicht mehr in der Datei stehen, werden
 entfernt, **außer** es gibt Anwesenheitsdaten. Anzeigename: „Q2 Sport GK 1 SZ“ aus Kurskürzel + `fach_bezeichnungen`.
@@ -137,9 +141,14 @@ Kurse** und überleben das Löschen von Kursen/Halbjahren. `benutzer_id = NULL` 
 Auto-Matching mehr. Alles (auch Automatisches) ist im UI änder- und aufhebbar.
 
 **Externe Lehrkräfte** (`benutzer.extern = 1`, `moodle_id = 'extern:…'`, Rolle `lehrkraft`): Lehrkräfte ohne
-Moodle-Konto (z.B. Klausur an anderer Schule). Pflicht: Vor-/Nachname, Kürzel (eindeutig, nach dem Anlegen nicht
-änderbar), E-Mail. Verwaltbar von **jeder** Stufenleitung und Admin, unabhängig von Stufen. Können sich nicht anmelden,
-erhalten aber die Mail-Token-Links. Der Moodle-Sync löscht sie nicht und lässt ihr Kürzel unangetastet.
+Moodle-Konto (z.B. Klausur an anderer Schule). Pflicht ist nur der Nachname und ein eindeutiges Kürzel (nach dem
+Anlegen nicht mehr änderbar); Vorname und E-Mail sind optional (ohne Vorname kein Komma in der Anzeige „Nachname,
+Vorname“; ohne E-Mail bekommt sie keine Anwesenheits-Mails, erscheint aber korrekt in den Listen). Verwaltbar von
+**jeder** Stufenleitung und Admin, unabhängig von Stufen. Können sich nicht anmelden, erhalten aber die
+Mail-Token-Links, sofern eine E-Mail hinterlegt ist. Der Moodle-Sync löscht sie nicht und lässt ihr Kürzel
+unangetastet. Zwei verschiedene Kürzel derselben Person (z.B. altes und neues) sind unproblematisch – beide können
+unabhängig voneinander per Zuordnung auf dasselbe Konto zeigen; `lehrer_zuordnungen` hat keine Eindeutigkeit auf
+`benutzer_id`. Lehrkräfte ohne E-Mail sind in den Zuordnungs-Listen mit einem Hinweis („✉️ fehlt“) markiert.
 
 **Klausuren:** Einzeln anlegen (Stufe → Kurs, mehrere Klausuren je Kurs) oder Excel-Paste: Spalten `Kurs, Datum
 (TT.MM.JJJJ), Uhrzeit, Dauer` (Kopfzeile Pflicht, Reihenfolge egal; `Anzeigename`/`TN` ignoriert). Die CSV-Vorlage
@@ -147,12 +156,13 @@ erhalten aber die Mail-Token-Links. Der Moodle-Sync löscht sie nicht und lässt
 gewähltes Halbjahr, weil Kurskürzel nur je Halbjahr eindeutig sind. Import-Priorität: gleicher Kurs+Datum → aktualisieren;
 Klausur ohne Datum → füllen; sonst neu. Undatierte Klausuren stehen unter den datierten.
 
-**E-Mail** (`Cron/erinnerungen_senden.php`, stündlich; `Mail/`): (1) Erstmeldung an die Fachlehrkraft, sobald Termin
-(Datum+Uhrzeit) vergangen; nach 7 Tagen ohne Antwort einmalig eine Erinnerung. Links mit Token
+**E-Mail** (`Cron/erinnerungen_senden.php`, stündlich; `Mail/`): Erstmeldung an die Fachlehrkraft, sobald der
+Klausurtermin (Datum+Uhrzeit) vergangen ist; solange danach keine Anwesenheit erfasst ist (egal ob per Mail-Link
+oder direkt im Tool), **täglich** eine Erinnerung – kein einmaliges Erinnern nach 7 Tagen mehr. Die Stufenleitung
+bekommt **keine** eigene Erinnerung (bewusst entfernte Funktion, siehe Migration 005). Links mit Token
 (`random_bytes(32)`, kein Ablauf): `/anwesenheit/alle-da?token=`, `/anwesenheit/eingabe?token=`,
-`POST /anwesenheit/token-eintrag` – **ohne Login**, Token = Authentifizierung. (2) **Übersicht an die
-Stufenleitung**: eine Woche nach der Klausur noch keine Anwesenheit → Sammelmail über Klausuren der *eigenen* Stufen,
-einmalig je Klausur und Person. Manuell: `POST /api/stufenleitung/email-ausloesen/{klausur_id}`.
+`POST /anwesenheit/token-eintrag` – **ohne Login**, Token = Authentifizierung. Manuell auslösen (immer als
+`erstmeldung`): `POST /api/stufenleitung/email-ausloesen/{klausur_id}`.
 
 **Moodle** (`Auth/MoodleApi`): `core_user_get_users` für `auth=ldap` und `manual` (`{MOODLE_URL}/webservice/rest/server.php`).
 Lehrkraft = Custom-Field `klasse == "Lehrkraft"`; Kürzel aus dem Nachnamen (`Gebauer (SZ)` → `SZ`); E-Mail nur für
@@ -161,7 +171,7 @@ Lehrkräfte; Stufe aus `klasse`. Nicht mehr vorhandene, unreferenzierte, nicht-e
 ## API (`public/api.php`)
 
 `GET /api/me` · Admin: `/admin/benutzer[/{id}/rollen]`, `/admin/moodle-sync`, `/admin/faecher[/{k}]`, `/admin/stufen`,
-`/admin/benutzer/{id}/stufenleitungen` · Stufenleitung: `/stufenleitung/gomst-import`, `…/zuordnungen` (GET/POST),
+`/admin/benutzer/{id}/stufenleitungen` · Stufenleitung: `/stufenleitung/gomsth-import`, `…/zuordnungen` (GET/POST),
 `…/moodle-schueler`, `…/externe-lehrkraefte[/{id}]`, `…/meine-stufen[/{id}]`, `…/lehrkraefte`, `…/halbjahre[/{id}/kurse]`,
 `…/halbjahr-vorschlag`, `…/kurse/{id}[/schueler|/zusatz-schueler[/{ks}]]`, `…/entschuldigung/{id}`,
 `…/email-ausloesen/{klausur}`, `…/daten/{halbjahr}` (löschen) · Klausuren: `/klausuren[/{id}]`, `/klausuren/vorlage`,
