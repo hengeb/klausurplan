@@ -182,8 +182,7 @@ function renderMeineStufenKarte(karte, stufen, nachAenderung) {
             ? `<p>${chips}</p>`
             : '<p class="hinweis">Du bist derzeit für keine Stufe zuständig.</p>'}
         <p class="hinweis">
-            Die Zuständigkeit bestimmt, welche Klausuren standardmäßig in deiner Liste erscheinen
-            und für welche Stufen du Übersichts-E-Mails zur Anwesenheit erhältst.
+            Die Zuständigkeit bestimmt, welche Klausuren standardmäßig in deiner Liste erscheinen.
             Du verwaltest sie selbst.
         </p>
         <button class="btn btn-sekundaer" type="button">Stufen verwalten</button>`;
