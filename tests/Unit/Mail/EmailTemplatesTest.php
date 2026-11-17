@@ -24,17 +24,18 @@ final class EmailTemplatesTest extends TestCase
 
     private const TOKEN = 'abc123def456';
 
-    public function testErstmeldungEnthaeltKursDatumUndBeideLinks(): void
+    public function testErstmeldungEnthaeltKursDatumUndGenauEinenLink(): void
     {
         $html = EmailTemplates::erstmeldung(['kurs_anzeigename' => 'Q2 Sport GK 1 SZ', 'termin_datum' => '2026-01-31'], self::TOKEN);
 
         $this->assertStringContainsString('Bitte trage die Anwesenheit', $html);
         $this->assertStringContainsString('Q2 Sport GK 1 SZ', $html);
         $this->assertStringContainsString('31.01.2026', $html);
-        $this->assertStringContainsString('href="https://schule.example/klausurplan/anwesenheit/alle-da?token=abc123def456"', $html);
+        // Genau ein Link: zur Eingabeseite (dort „alle anwesend“ oder einzeln) – nichts, was per GET speichert
+        $this->assertSame(1, substr_count($html, 'href='));
         $this->assertStringContainsString('href="https://schule.example/klausurplan/anwesenheit/eingabe?token=abc123def456"', $html);
-        $this->assertStringContainsString('Alle waren anwesend', $html);
-        $this->assertStringContainsString('Jemand hat gefehlt', $html);
+        $this->assertStringNotContainsString('alle-da', $html);
+        $this->assertStringContainsString('Anwesenheit eintragen</a>', $html);
         $this->assertStringNotContainsString('Erinnerung:', $html);
     }
 
@@ -51,7 +52,26 @@ final class EmailTemplatesTest extends TestCase
     {
         $html = EmailTemplates::erstmeldung(['kurs_anzeigename' => 'X', 'termin_datum' => null], self::TOKEN);
 
-        $this->assertStringContainsString('<strong>Datum:</strong> –', $html);
+        $this->assertMatchesRegularExpression('#<strong>Datum:</strong></td><td[^>]*>–</td>#', $html);
+    }
+
+    public function testKursnameMitSonderzeichenWirdNurEinmalEscaped(): void
+    {
+        $html = EmailTemplates::erstmeldung(['kurs_anzeigename' => 'Q2 Kunst & Musik', 'termin_datum' => null], self::TOKEN);
+
+        $this->assertStringContainsString('Q2 Kunst &amp; Musik', $html);
+        $this->assertStringNotContainsString('&amp;amp;', $html);
+    }
+
+    public function testLayoutIstOutlookTauglich(): void
+    {
+        $html = EmailTemplates::erinnerung(['kurs_anzeigename' => 'X', 'termin_datum' => null], self::TOKEN);
+
+        // Outlook (Word-Engine) ignoriert rem, max-width, border-radius und inline-block an Links
+        $this->assertDoesNotMatchRegularExpression('/\d(\.\d+)?rem|max-width|border-radius|inline-block/', $html);
+        // Buttons als Tabellenzellen mit bgcolor-Attribut
+        $this->assertStringContainsString('bgcolor="#1a3a5c"', $html);
+        $this->assertStringContainsString('width="560"', $html);
     }
 
     public function testKursnameWirdEscaped(): void
@@ -75,7 +95,7 @@ final class EmailTemplatesTest extends TestCase
 
         $html = EmailTemplates::erstmeldung(['kurs_anzeigename' => 'X', 'termin_datum' => null], self::TOKEN);
 
-        $this->assertStringContainsString('href="/anwesenheit/alle-da?token=', $html);
+        $this->assertStringContainsString('href="/anwesenheit/eingabe?token=', $html);
     }
 
 }

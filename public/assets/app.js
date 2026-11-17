@@ -1722,7 +1722,7 @@ function renderKlausurenUebersicht(el, klausuren, nachschreibtermine = [], me = 
                         <th>Uhrzeit</th>
                         <th>Dauer</th>
                         <th>TN</th>
-                        <th>Anw.</th>
+                        <th>Anwesenheit</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -1864,7 +1864,7 @@ function renderKlausurZeile(k) {
             <td>${uhrzeit}</td>
             <td>${dauer}</td>
             <td>${k.schueler_anzahl}</td>
-            <td class="td-aw-status">${renderAnwesenheitStatus(k.anwesenheit_erfasst, k.schueler_anzahl)}</td>
+            <td class="td-aw-status">${renderAnwesenheitStatus(k)}</td>
             <td class="td-aktionen">${aktionen.join(' ')}</td>
         </tr>`;
 }
@@ -2201,8 +2201,10 @@ function parsePasteVorschau(text, vorschauEl, nachImport, holeHalbjahrId) {
                 html += '</ul>';
             }
 
-            html += `<a href="#klausuren" class="btn btn-sekundaer" style="margin-top:.5rem">Zur Übersicht →</a></div>`;
+            // Kein Link auf #klausuren: Wir sind schon dort, ein Klick würde kein hashchange auslösen.
+            html += `<button type="button" class="btn btn-sekundaer" id="paste-zur-uebersicht" style="margin-top:.5rem">Zur Übersicht →</button></div>`;
             ergebnisEl.innerHTML = html;
+            ergebnisEl.querySelector('#paste-zur-uebersicht').addEventListener('click', () => nachImport?.());
         } catch (err) {
             ergebnisEl.innerHTML = `<p class="fehler">${err.message}</p>`;
         } finally {
@@ -2379,12 +2381,13 @@ async function zeigeAnwesenheitDialog(klausur) {
             okEl.style.display = '';
 
             // Anwesenheits-Status in der Übersichtstabelle aktualisieren
-            const erfasst = Object.values(status).filter(s => s.status !== 'ausstehend').length;
-            const gesamt  = Object.keys(status).length;
-            const tr      = document.querySelector(`tr[data-klausur-id="${klausur.id}"]`);
+            const werte = Object.values(status);
+            klausur.schueler_anzahl     = werte.length;
+            klausur.anwesenheit_erfasst = werte.filter(s => s.status !== 'ausstehend').length;
+            klausur.anwesenheit_fehlend = werte.filter(s => s.status === 'fehlend').length;
+            const tr = document.querySelector(`tr[data-klausur-id="${klausur.id}"]`);
             if (tr) {
-                tr.querySelector('.td-aw-status').innerHTML =
-                    renderAnwesenheitStatus(erfasst, gesamt);
+                tr.querySelector('.td-aw-status').innerHTML = renderAnwesenheitStatus(klausur);
             }
         } catch (err) {
             fehlerEl.textContent  = err.message;
@@ -2791,16 +2794,43 @@ function renderKlausurVerknuepfung(el, ntId, alleKlausuren, bereitsVerknuepft, n
 // ---------------------------------------------------------------------------
 
 /**
- * Zeigt den Bearbeitungsstand der Anwesenheit als farbige Fraktion.
- * erfasst / gesamt: "–" | "0/5" grau | "3/5" orange | "5/5" grün
+ * Ist der Klausurtermin vorbei? Ohne Uhrzeit gilt – wie im Cronjob – 12 Uhr.
+ * Ohne Datum: nie.
  */
-function renderAnwesenheitStatus(erfasst, gesamt) {
-    const g = parseInt(gesamt) || 0;
-    if (g === 0) return '–';
-    const e = parseInt(erfasst) || 0;
-    if (e === 0)    return `<span class="aw-status-offen">${e}/${g}</span>`;
-    if (e < g)      return `<span class="aw-status-teil">${e}/${g}</span>`;
-    return              `<span class="aw-status-voll">${e}/${g}</span>`;
+function klausurIstVorbei(k, jetzt = new Date()) {
+    if (!k.termin_datum) return false;
+    const zeit = (k.termin_uhrzeit || '12:00').substring(0, 5);
+    return new Date(`${k.termin_datum}T${zeit}:00`) < jetzt;
+}
+
+/**
+ * Anwesenheitsspalte der Klausurübersicht. Unterscheidet klar, ob noch Rückmeldungen
+ * fehlen und ob alle anwesend waren:
+ *   „–“ (noch nicht fällig) | „⏳ Rückmeldung fehlt“ | „⏳ 2 von 5 offen“ |
+ *   „✓ alle anwesend“ | „✗ 1 von 5 gefehlt“
+ * Erwartet die Felder schueler_anzahl, anwesenheit_erfasst, anwesenheit_fehlend, termin_datum, termin_uhrzeit.
+ */
+function renderAnwesenheitStatus(k) {
+    const gesamt  = parseInt(k.schueler_anzahl) || 0;
+    const erfasst = parseInt(k.anwesenheit_erfasst) || 0;
+    const fehlend = parseInt(k.anwesenheit_fehlend) || 0;
+    if (gesamt === 0) return '<span class="aw-status-offen">–</span>';
+
+    const fehltText = fehlend > 0
+        ? `<span class="aw-status-fehlt" title="${fehlend} von ${gesamt} Prüflingen haben gefehlt">✗ ${fehlend} von ${gesamt} gefehlt</span>`
+        : '';
+
+    if (erfasst >= gesamt) {
+        return fehltText || `<span class="aw-status-voll" title="Alle ${gesamt} Prüflinge waren anwesend">✓ alle anwesend</span>`;
+    }
+    if (erfasst === 0) {
+        return klausurIstVorbei(k)
+            ? '<span class="aw-status-teil" title="Die Lehrkraft hat die Anwesenheit noch nicht eingetragen">⏳ Rückmeldung fehlt</span>'
+            : '<span class="aw-status-offen" title="Die Klausur hat noch nicht stattgefunden">–</span>';
+    }
+    const offen = gesamt - erfasst;
+    return `<span class="aw-status-teil" title="Für ${offen} von ${gesamt} Prüflingen fehlt die Rückmeldung">⏳ ${offen} von ${gesamt} offen</span>`
+        + (fehltText ? `<br>${fehltText}` : '');
 }
 
 /** YYYY-MM-DD → TT.MM.JJJJ */

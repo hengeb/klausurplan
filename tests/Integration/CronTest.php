@@ -113,7 +113,7 @@ final class CronTest extends IntegrationTestCase
         $mails = array_values(array_filter($this->senke->mails(), fn ($m) => str_contains($m['an'], 'sz@example.org')));
         $this->assertCount(1, $mails);
         $this->assertStringStartsWith('Anwesenheit Klausur Kurs A am ', $mails[0]['betreff']);
-        $this->assertStringContainsString('alle-da?token=', $mails[0]['text']);
+        $this->assertStringContainsString('eingabe?token=', $mails[0]['text']);
         $this->assertSame(1, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ? AND typ = 'erstmeldung'", [$klausur]));
 
         // Derselbe Tag: keine zweite Mail
@@ -174,11 +174,25 @@ final class CronTest extends IntegrationTestCase
         $this->assertStringContainsString('0 gesendet', $ausgabe);
     }
 
+    public function testKlausurOhneUhrzeitGiltAb12UhrAlsVergangen(): void
+    {
+        $gestern = $this->klausur($this->q2, 'A', $this->sz, $this->tage(1), null);
+        // Heute um 12 Uhr (DB-Zeit) ist je nach Uhrzeit des Testlaufs vorbei oder nicht –
+        // erwartet wird genau das Ergebnis, das die 12-Uhr-Regel vorgibt.
+        $heute    = $this->klausur($this->q2, 'B', $this->sz, $this->tage(0), null);
+        $nachMittag = (int) $this->fx->wert("SELECT NOW() > TIMESTAMP(CURDATE(), '12:00:00')");
+
+        $this->cron();
+
+        $this->assertSame(1, $this->fx->zaehle("SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ? AND typ = 'erstmeldung'", [$gestern]));
+        $this->assertSame($nachMittag, $this->fx->zaehle('SELECT COUNT(*) FROM email_benachrichtigungen WHERE klausur_id = ?', [$heute]));
+    }
+
     public function testKlausurenOhneTerminOhneLehrkraftOderInDerZukunftBekommenKeineMail(): void
     {
         $this->klausur($this->q2, 'A', $this->sz, gmdate('Y-m-d', strtotime('+3 days')));   // Zukunft
         $this->klausur($this->q2, 'B', null, $this->tage(3));                             // keine Lehrkraft
-        $this->klausur($this->q2, 'C', $this->sz, $this->tage(3), null);                  // ohne Uhrzeit
+        $this->klausur($this->q2, 'C', $this->sz, gmdate('Y-m-d', strtotime('+1 day')), null); // morgen, ohne Uhrzeit
         $ohneMail = $this->fx->benutzer('Otto', 'Ohne (OO)', ['lehrkraft'], 'OO', null);
         $this->klausur($this->q2, 'D', $ohneMail, $this->tage(3));                        // Lehrkraft ohne E-Mail
 

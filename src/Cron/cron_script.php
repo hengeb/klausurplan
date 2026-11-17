@@ -3,7 +3,7 @@
 /**
  * Cron-Script: Moodle-Nutzer synchronisieren (höchstens einmal täglich) und
  * Anwesenheits-E-Mails an Fachlehrkräfte senden.
- * Erstmeldung sobald der Klausurtermin vergangen ist; solange danach keine Anwesenheit
+ * Erstmeldung sobald der Klausurtermin vergangen ist (ohne Uhrzeit: ab 12 Uhr); solange danach keine Anwesenheit
  * erfasst wurde, täglich eine Erinnerung.
  * Empfohlener Cron-Eintrag: 0 * * * * php /var/www/klausurplan/src/Cron/cron_script.php
  */
@@ -39,6 +39,7 @@ if (!MoodleApi::wurdeHeuteSynchronisiert()) {
 }
 
 // Vergangene Klausuren mit bekannter Lehrkraft-E-Mail, für die noch keine Anwesenheit erfasst ist.
+// Klausuren ohne Uhrzeit gelten ab 12 Uhr des Klausurtags als vergangen.
 // Sobald Anwesenheit erfasst ist (egal ob über den Mail-Link oder direkt im Tool), entfällt jede
 // weitere Mail zu dieser Klausur.
 $stmt = $db->query(
@@ -53,8 +54,7 @@ $stmt = $db->query(
      JOIN kurse k    ON k.id = kl.kurs_id
      JOIN benutzer b ON b.id = k.lehrer_id
      WHERE kl.termin_datum    IS NOT NULL
-       AND kl.termin_uhrzeit  IS NOT NULL
-       AND TIMESTAMP(kl.termin_datum, kl.termin_uhrzeit) < NOW()
+       AND TIMESTAMP(kl.termin_datum, COALESCE(kl.termin_uhrzeit, '12:00:00')) < NOW()
        AND b.email IS NOT NULL
        AND b.email <> ''
        AND NOT EXISTS (SELECT 1 FROM anwesenheiten a

@@ -86,6 +86,8 @@ class LehrkraftApi
                     (SELECT COUNT(*) FROM kurs_schueler ks WHERE ks.kurs_id = kurs.id) AS schueler_anzahl,
                     (SELECT COUNT(*) FROM anwesenheiten a
                      WHERE a.klausur_id = k.id AND a.status != 'ausstehend')          AS anwesenheit_erfasst,
+                    (SELECT COUNT(*) FROM anwesenheiten a
+                     WHERE a.klausur_id = k.id AND a.status = 'fehlend')              AS anwesenheit_fehlend,
                     EXISTS (SELECT 1 FROM stufenleitungen sl_e
                             WHERE sl_e.stufe_id = s.id AND sl_e.benutzer_id = ?)      AS ist_eigene_sl
              FROM klausuren k

@@ -267,6 +267,52 @@ final class AnwesenheitApiTest extends TestCase
         $this->assertSame([[12, 1, 'anwesend', null, null], [12, 2, 'anwesend', null, null]], array_column($inserts, 'params'));
     }
 
+    public function testEingabeSeiteSpeichertNichtsUndBietetAlleDaPerPostAn(): void
+    {
+        // Link-Scanner rufen den Mail-Link per GET auf – das darf nichts eintragen
+        $this->tokenGueltig();
+        $this->pruefllinge();
+        $this->db->onRows('/FROM klausuren kl\s+JOIN kurse k ON k\.id = kl\.kurs_id\s+WHERE kl\.id = \?/', [
+            ['termin_datum' => '2026-01-31', 'kurs_anzeigename' => 'X'],
+        ]);
+
+        $html = $this->ausgabe(fn () => AnwesenheitApi::eingabeSeite(self::TOKEN));
+
+        $this->assertStringContainsString('<form method="post" action="/anwesenheit/alle-da"', $html);
+        $this->assertStringContainsString('Ja, alle waren anwesend', $html);
+        $this->assertSame(2, substr_count($html, 'name="token" value="' . self::TOKEN . '"'), 'beide Formulare tragen den Token');
+        $this->assertStringNotContainsString('bereits eine Anwesenheit', $html);
+        $this->assertStringNotContainsString(' checked', $html);
+        $this->assertFalse($this->db->wurdeAusgefuehrt('/^\s*(INSERT|UPDATE|DELETE)/i'));
+    }
+
+    public function testEingabeSeiteBelegtVorhandeneEintraegeVor(): void
+    {
+        $this->tokenGueltig();
+        $this->pruefllinge();
+        $this->db->onRows('/FROM klausuren kl\s+JOIN kurse k ON k\.id = kl\.kurs_id\s+WHERE kl\.id = \?/', [
+            ['termin_datum' => null, 'kurs_anzeigename' => 'X'],
+        ]);
+        $this->db->onRows('/SELECT kurs_schueler_id, status, kommentar FROM anwesenheiten/', [
+            ['kurs_schueler_id' => 1, 'status' => 'anwesend', 'kommentar' => null],
+            ['kurs_schueler_id' => 2, 'status' => 'fehlend', 'kommentar' => 'krank "Grippe"'],
+        ]);
+
+        $html = $this->ausgabe(fn () => AnwesenheitApi::eingabeSeite(self::TOKEN));
+
+        $this->assertStringContainsString('bereits eine Anwesenheit eingetragen', $html);
+        $this->assertStringContainsString('name="fehlend[]" value="2" checked', $html);
+        $this->assertStringContainsString('name="fehlend[]" value="1">', $html);
+        $this->assertStringContainsString('value="krank &quot;Grippe&quot;"', $html);
+        $this->assertSame([12], $this->db->aufrufe('/SELECT kurs_schueler_id, status, kommentar/')[0]['params']);
+    }
+
+    public function testAlleDaOhneTokenWirdAbgewiesen(): void
+    {
+        $this->assertStringContainsString('Dieser Link ist ungültig', $this->ausgabe(fn () => AnwesenheitApi::alleDa('')));
+        $this->assertFalse($this->db->wurdeAusgefuehrt('/./'));
+    }
+
     public function testEingabeSeiteListetAllePruefllinge(): void
     {
         $this->tokenGueltig();

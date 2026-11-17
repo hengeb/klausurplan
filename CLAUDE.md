@@ -28,7 +28,7 @@ DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [R
 | Befehl | Zweck | Dauer |
 |---|---|---|
 | `vendor/bin/phpunit --testsuite Unit` (`composer test`) | PHP-Unit-Tests mit `FakePdo`, ohne DB | < 1 s |
-| `node --test tests/js/` (`npm test`) | Frontend-Tests (jsdom) | ~3 s |
+| `node --test tests/js/*.test.js` (`npm test`) | Frontend-Tests (jsdom); Node 22 braucht das Datei-Muster statt des Verzeichnisses | ~3 s |
 | `vendor/bin/phpunit --testsuite Integration` | lädt nur die Integrationsklassen (ohne DB alle „skipped“) – fängt Syntax-/Ladefehler | < 1 s |
 | `bin/test-integration.sh` | Integrationstests gegen Wegwerf-MariaDB in Docker | ~40 s |
 | `bin/test-integration.sh --coverage` | dito, Unit + Integration mit Coverage (pcov, Bericht in `coverage/`) | ~40 s |
@@ -39,7 +39,7 @@ DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [R
   nie lesen, ausgeben oder in Tests verwenden.**
 - **Neuer/geänderter Code bekommt Tests.** Unit-Tests prüfen Logik und *welche* Statements gesendet werden;
   ob das SQL stimmt, prüfen nur die Integrationstests → SQL-Änderungen immer dort absichern.
-- Stand: 342 PHP-Unit-, 93 Integrations-, 38 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
+- Stand: 348 PHP-Unit-, 95 Integrations-, 39 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
   ≈ 99,85 % (offen nur `exit`, private Konstruktoren). Nicht abgedeckt: `public/*.php`-Einstiegsskripte, `setup.php`, `bin/`.
 - Test-Nahtstellen im Produktivcode (nicht entfernen): `Support\Prozess::beenden()` statt `exit`,
   `Database::setInstance()`, `Router::jsonBody($roh)`, `MoodleApi::alleNutzer()/get()` (protected).
@@ -156,15 +156,25 @@ unabhängig voneinander per Zuordnung auf dasselbe Konto zeigen; `lehrer_zuordnu
 (TT.MM.JJJJ), Uhrzeit, Dauer` (Kopfzeile Pflicht, Reihenfolge egal; `Anzeigename`/`TN` ignoriert). Die CSV-Vorlage
 (`GET /api/klausuren/vorlage?halbjahr_id=`) und der Import (`POST …/paste-import?halbjahr_id=`) beziehen sich auf ein
 gewähltes Halbjahr, weil Kurskürzel nur je Halbjahr eindeutig sind. Import-Priorität: gleicher Kurs+Datum → aktualisieren;
-Klausur ohne Datum → füllen; sonst neu. Undatierte Klausuren stehen unter den datierten.
+Klausur ohne Datum → füllen; sonst neu. Undatierte Klausuren stehen unter den datierten. Nach dem Excel-Import
+wechselt „Zur Übersicht“ per Button auf den Übersicht-Tab (kein `#klausuren`-Link – gleicher Hash löst kein Routing aus).
+Anwesenheitsspalte der Übersicht (`renderAnwesenheitStatus(k)`, API liefert `anwesenheit_erfasst` und
+`anwesenheit_fehlend`): „–“ (noch nicht fällig, gleiche 12-Uhr-Regel wie der Cron) · „⏳ Rückmeldung fehlt“ ·
+„⏳ x von n offen“ · „✓ alle anwesend“ · „✗ x von n gefehlt“.
 
 **E-Mail** (`Cron/cron_script.php`, stündlich; `Mail/`): Erstmeldung an die Fachlehrkraft, sobald der
-Klausurtermin (Datum+Uhrzeit) vergangen ist; solange danach keine Anwesenheit erfasst ist (egal ob per Mail-Link
+Klausurtermin (Datum+Uhrzeit; **ohne Uhrzeit gilt 12 Uhr**, ohne Datum nie) vergangen ist; solange danach keine Anwesenheit erfasst ist (egal ob per Mail-Link
 oder direkt im Tool), **täglich** eine Erinnerung – kein einmaliges Erinnern nach 7 Tagen mehr. Die Stufenleitung
-bekommt **keine** eigene Erinnerung (bewusst entfernte Funktion, siehe Migration 005). Links mit Token
-(`random_bytes(32)`, kein Ablauf): `/anwesenheit/alle-da?token=`, `/anwesenheit/eingabe?token=`,
-`POST /anwesenheit/token-eintrag` – **ohne Login**, Token = Authentifizierung. Manuell auslösen (immer als
-`erstmeldung`): `POST /api/stufenleitung/email-ausloesen/{klausur_id}`.
+bekommt **keine** eigene Erinnerung (bewusst entfernte Funktion, siehe Migration 005). Token
+(`random_bytes(32)`, kein Ablauf) – **ohne Login**, Token = Authentifizierung. Die Mail enthält **genau einen** Link:
+`GET /anwesenheit/eingabe?token=` → Seite mit „Ja, alle waren anwesend“ (`POST /anwesenheit/alle-da`) und darunter
+der Einzeleingabe (`POST /anwesenheit/token-eintrag`, vorhandene Einträge vorausgefüllt). **Kein GET speichert etwas**,
+weil Link-Scanner von Mail-Sicherheitsfiltern (z.B. Defender Safe Links) Links automatisch aufrufen – sonst stünde
+fälschlich „alle anwesend“ im Tool und die Erinnerungen blieben aus. `GET /anwesenheit/alle-da?token=` (alte Mails)
+zeigt dieselbe Eingabeseite. Manuell auslösen (immer als
+`erstmeldung`): `POST /api/stufenleitung/email-ausloesen/{klausur_id}`. Mail-HTML ist **Outlook-tauglich** gebaut
+(Tabellen-Layout, `bgcolor`, nur px, Buttons als Tabellenzellen; kein `rem`/`max-width`/`border-radius`/`inline-block`
+– Test `testLayoutIstOutlookTauglich`). Die Textfassung (`Mailer::alsText`) behält Links als „Text: URL“.
 
 **Moodle** (`Auth/MoodleApi`): `core_user_get_users` für `auth=ldap` und `manual` (`{MOODLE_URL}/webservice/rest/server.php`).
 Lehrkraft = Custom-Field `klasse == "Lehrkraft"`; Kürzel aus dem Nachnamen (`Gebauer (SZ)` → `SZ`); E-Mail nur für

@@ -16,11 +16,14 @@ $dotenv->load();
 $path  = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 $token = trim($_GET['token'] ?? '');
 
-if ($path === '/anwesenheit/alle-da' && $token !== '') {
-    AnwesenheitApi::alleDa($token);
+// Gespeichert wird nur per POST (Buttons auf der Eingabeseite). Link-Scanner von Mail-Sicherheitsfiltern
+// öffnen Links aus Mails automatisch per GET, schicken aber keine Formulare ab.
+if ($path === '/anwesenheit/alle-da' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    AnwesenheitApi::alleDa(trim($_POST['token'] ?? ''));
 }
 
-if ($path === '/anwesenheit/eingabe' && $token !== '') {
+// Mail-Link; /alle-da per GET nur noch für bereits verschickte alte Mails → dieselbe Seite
+if (($path === '/anwesenheit/eingabe' || $path === '/anwesenheit/alle-da') && $token !== '') {
     AnwesenheitApi::eingabeSeite($token);
 }
 

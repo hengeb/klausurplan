@@ -3,7 +3,7 @@
   "private": true,
   "description": "Nur für die Frontend-Tests (jsdom). Wird nicht auf den Server hochgeladen; das Frontend selbst braucht kein Node.",
   "scripts": {
-    "test": "node --test tests/js/"
+    "test": "node --test tests/js/*.test.js"
   },
   "devDependencies": {
     "jsdom": "^26.1.0"

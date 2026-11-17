@@ -4,8 +4,18 @@ declare(strict_types=1);
 
 namespace Klausurplan\Mail;
 
+/**
+ * HTML-Vorlagen für die Anwesenheits-Mails.
+ *
+ * Bewusst „altmodisch“ gebaut, damit Outlook (Desktop, Word-Rendering) sie sauber darstellt:
+ * Layout über Tabellen mit festen Breiten, Farben zusätzlich als bgcolor-Attribut, nur px-Werte,
+ * Inline-Styles an jeder Zelle, Buttons als Tabellenzellen (Outlook ignoriert padding,
+ * border-radius und display:inline-block an Links sowie max-width und rem).
+ */
 class EmailTemplates
 {
+    private const SCHRIFT = 'font-family:Arial,Helvetica,sans-serif;';
+
     /**
      * Erstmeldung: Lehrkraft wird gebeten, die Anwesenheit einzutragen.
      *
@@ -15,13 +25,12 @@ class EmailTemplates
     {
         $kursname = htmlspecialchars($klausur['kurs_anzeigename'] ?? '');
         $datum    = self::formatDatum($klausur['termin_datum'] ?? null);
-        [$urlAlleDa, $urlEingabe] = self::tokenUrls($token);
 
         return self::layout(
             "Anwesenheit eintragen – {$kursname}",
-            "<p>Bitte trage die Anwesenheit für deine Klausur ein.</p>
-            <p><strong>Kurs:</strong> {$kursname}<br><strong>Datum:</strong> {$datum}</p>" .
-            self::buttons($urlAlleDa, $urlEingabe)
+            self::absatz('Bitte trage die Anwesenheit für deine Klausur ein.') .
+            self::klausurInfo($kursname, $datum) .
+            self::eintragenButton($token)
         );
     }
 
@@ -35,13 +44,12 @@ class EmailTemplates
     {
         $kursname = htmlspecialchars($klausur['kurs_anzeigename'] ?? '');
         $datum    = self::formatDatum($klausur['termin_datum'] ?? null);
-        [$urlAlleDa, $urlEingabe] = self::tokenUrls($token);
 
         return self::layout(
             "Erinnerung: Anwesenheit eintragen – {$kursname}",
-            "<p><strong>Erinnerung:</strong> Die Anwesenheit für deine folgende Klausur wurde noch nicht eingetragen.</p>
-            <p><strong>Kurs:</strong> {$kursname}<br><strong>Datum:</strong> {$datum}</p>" .
-            self::buttons($urlAlleDa, $urlEingabe)
+            self::absatz('<strong>Erinnerung:</strong> Die Anwesenheit für deine folgende Klausur wurde noch nicht eingetragen.') .
+            self::klausurInfo($kursname, $datum) .
+            self::eintragenButton($token)
         );
     }
 
@@ -52,52 +60,85 @@ class EmailTemplates
         return $datum ? date('d.m.Y', (int) strtotime($datum)) : '–';
     }
 
-    /** @return array{string, string} [urlAlleDa, urlEingabe] */
-    private static function tokenUrls(string $token): array
+    /**
+     * Ein einziger Link zur Eingabeseite. Dort wählt die Lehrkraft „Alle waren anwesend“ oder gibt
+     * Fehlende einzeln an – gespeichert wird erst dort per POST, damit Link-Scanner von
+     * Mail-Sicherheitsfiltern nichts auslösen können.
+     */
+    private static function eintragenUrl(string $token): string
     {
-        $appUrl = rtrim($_ENV['APP_URL'] ?? '', '/');
-        $t      = urlencode($token);
-        return [
-            "{$appUrl}/anwesenheit/alle-da?token={$t}",
-            "{$appUrl}/anwesenheit/eingabe?token={$t}",
-        ];
+        return rtrim($_ENV['APP_URL'] ?? '', '/') . '/anwesenheit/eingabe?token=' . urlencode($token);
     }
 
-    private static function buttons(string $urlAlleDa, string $urlEingabe): string
+    private static function absatz(string $html): string
     {
-        $urlAlleDa  = htmlspecialchars($urlAlleDa);
-        $urlEingabe = htmlspecialchars($urlEingabe);
+        return '<p style="margin:0 0 16px 0;' . self::SCHRIFT . 'font-size:15px;line-height:22px;color:#333333;">'
+            . $html . '</p>';
+    }
+
+    /** Kurs und Datum als kleine, hinterlegte Tabelle. */
+    private static function klausurInfo(string $kursname, string $datum): string
+    {
+        $zelle = 'style="padding:4px 12px 4px 0;' . self::SCHRIFT . 'font-size:15px;line-height:22px;color:#333333;"';
         return <<<HTML
-        <p style="margin-top:1.5rem">
-            <a href="{$urlAlleDa}"
-               style="display:inline-block;padding:.6rem 1.4rem;background:#27ae60;color:#fff;border-radius:4px;text-decoration:none;font-weight:bold;margin-right:.75rem">
-                Alle waren anwesend
-            </a>
-            <a href="{$urlEingabe}"
-               style="display:inline-block;padding:.6rem 1.4rem;background:#1a3a5c;color:#fff;border-radius:4px;text-decoration:none;font-weight:bold">
-                Jemand hat gefehlt
-            </a>
-        </p>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f2f5f8" style="background-color:#f2f5f8;margin:0 0 24px 0;">
+            <tr><td style="padding:12px 16px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                    <tr><td {$zelle}><strong>Kurs:</strong></td><td {$zelle}>{$kursname}</td></tr>
+                    <tr><td {$zelle}><strong>Datum:</strong></td><td {$zelle}>{$datum}</td></tr>
+                </table>
+            </td></tr>
+        </table>
         HTML;
     }
 
-    private static function layout(string $titel, string $inhalt): string
+    /** Ein Button als Tabellenzelle (in Outlook die einzige zuverlässige Variante). */
+    private static function button(string $url, string $text, string $farbe): string
     {
-        $titelEsc = htmlspecialchars($titel);
+        $url     = htmlspecialchars($url);
+        $schrift = self::SCHRIFT;
+        return <<<HTML
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 12px 0;">
+            <tr><td align="center" bgcolor="{$farbe}" style="background-color:{$farbe};padding:12px 24px;">
+                <a href="{$url}" style="{$schrift}font-size:15px;font-weight:bold;line-height:20px;color:#ffffff;text-decoration:none;">{$text}</a>
+            </td></tr>
+        </table>
+        HTML;
+    }
+
+    private static function eintragenButton(string $token): string
+    {
+        return self::button(self::eintragenUrl($token), 'Anwesenheit eintragen', '#1a3a5c')
+            . self::absatz('<span style="font-size:13px;color:#666666;">Dort kannst du mit einem Klick bestätigen, '
+                . 'dass alle anwesend waren, oder Fehlende einzeln angeben.</span>');
+    }
+
+    /** $titelEsc muss bereits HTML-escaped sein (enthält den escapten Kursnamen). */
+    private static function layout(string $titelEsc, string $inhalt): string
+    {
+        $schrift = self::SCHRIFT;
         return <<<HTML
         <!DOCTYPE html>
         <html lang="de">
         <head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{$titelEsc}</title>
         </head>
-        <body style="font-family:Arial,sans-serif;color:#333;background:#f5f5f5;margin:0;padding:2rem">
-            <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:2rem;border:1px solid #e0e0e0">
-                <h2 style="color:#1a3a5c;margin-top:0">{$titelEsc}</h2>
-                {$inhalt}
-                <hr style="border:none;border-top:1px solid #e0e0e0;margin:2rem 0">
-                <p style="font-size:.8rem;color:#888">Diese E-Mail wurde automatisch vom Klausurplan-System versandt. Bitte antworte nicht direkt auf diese Nachricht.</p>
-            </div>
+        <body style="margin:0;padding:0;background-color:#f5f5f5;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f5f5f5" style="background-color:#f5f5f5;">
+                <tr><td align="center" style="padding:24px 12px;">
+                    <table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:560px;background-color:#ffffff;border:1px solid #e0e0e0;">
+                        <tr><td style="padding:28px 32px 8px 32px;">
+                            <h2 style="margin:0 0 20px 0;{$schrift}font-size:20px;line-height:26px;font-weight:bold;color:#1a3a5c;">{$titelEsc}</h2>
+                            {$inhalt}
+                        </td></tr>
+                        <tr><td style="padding:16px 32px 24px 32px;border-top:1px solid #e0e0e0;{$schrift}font-size:12px;line-height:18px;color:#888888;">
+                            Diese E-Mail wurde automatisch vom Klausurplan-System versandt. Bitte antworte nicht direkt auf diese Nachricht.
+                        </td></tr>
+                    </table>
+                </td></tr>
+            </table>
         </body>
         </html>
         HTML;

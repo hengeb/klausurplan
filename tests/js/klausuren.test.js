@@ -185,6 +185,37 @@ test('Excel-Import: Halbjahr vorausgewählt, Vorlage-Link und Import folgen der 
     await warten();
     assert.ok(calls.some(c => c.startsWith('POST /klausuren/paste-import?halbjahr_id=3')));
     assert.match(d.querySelector('#paste-ergebnis').textContent, /1 Klausur\(en\) neu angelegt/);
+
+    // „Zur Übersicht“ wechselt auf den Übersicht-Tab (ein Link auf #klausuren täte nichts)
+    calls.length = 0;
+    d.querySelector('#paste-zur-uebersicht').click();
+    await warten();
+    assert.ok(!d.querySelector('#tab-uebersicht').classList.contains('versteckt'));
+    assert.ok(d.querySelector('#tab-paste').classList.contains('versteckt'));
+    assert.ok(d.querySelector('.tab[data-tab="uebersicht"]').classList.contains('aktiv'));
+    assert.ok(calls.some(c => c.startsWith('GET /klausuren')), 'Übersicht neu geladen');
+});
+
+test('Anwesenheitsspalte: offene Rückmeldungen und Fehlende sind klar unterscheidbar', async () => {
+    const fx = fixtures();
+    const morgen = new Date(Date.now() + 86400000).toISOString().substring(0, 10);
+    fx['GET /klausuren'] = [
+        klausur(1, { schueler_anzahl: 3, anwesenheit_erfasst: 3, anwesenheit_fehlend: 0 }),
+        klausur(2, { schueler_anzahl: 3, anwesenheit_erfasst: 3, anwesenheit_fehlend: 1 }),
+        klausur(3, { schueler_anzahl: 3, anwesenheit_erfasst: 0, anwesenheit_fehlend: 0 }),
+        klausur(4, { schueler_anzahl: 5, anwesenheit_erfasst: 2, anwesenheit_fehlend: 1 }),
+        klausur(5, { schueler_anzahl: 3, anwesenheit_erfasst: 0, termin_datum: morgen }),
+        klausur(6, { schueler_anzahl: 3, anwesenheit_erfasst: 0, termin_datum: '2026-01-05', termin_uhrzeit: null }),
+    ];
+    const { d } = await starte('klausuren', SL, fx, { warteMs: 60 });
+    const zelle = id => d.querySelector(`tr[data-klausur-id="${id}"] .td-aw-status`).textContent.trim();
+
+    assert.equal(zelle(1), '✓ alle anwesend');
+    assert.equal(zelle(2), '✗ 1 von 3 gefehlt');
+    assert.equal(zelle(3), '⏳ Rückmeldung fehlt');
+    assert.match(zelle(4), /⏳ 3 von 5 offen\s*✗ 1 von 5 gefehlt/);
+    assert.equal(zelle(5), '–', 'Zukunft: noch keine Rückmeldung erwartet');
+    assert.equal(zelle(6), '⏳ Rückmeldung fehlt', 'ohne Uhrzeit: ab 12 Uhr fällig');
 });
 
 test('Excel-Import: Vorschau meldet fehlende Spalte „Kurs“ und zu wenige Zeilen', async () => {

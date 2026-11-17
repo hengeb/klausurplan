@@ -97,7 +97,8 @@ final class KlausurenTest extends IntegrationTestCase
         $this->assertCount(1, $liste);
         $this->assertSame(['Schüler|Eva'], array_column($liste[0]['nachschreiber'], 'name_roh'));
         $this->assertSame(2, (int) $liste[0]['schueler_anzahl']);
-        $this->assertSame(1, (int) $liste[0]['anwesenheit_erfasst'] - 1, 'zwei erfasste Einträge');
+        $this->assertSame(2, (int) $liste[0]['anwesenheit_erfasst'], 'zwei erfasste Einträge');
+        $this->assertSame(2, (int) $liste[0]['anwesenheit_fehlend'], 'beide fehlend');
     }
 
     // ------------------------------------------------------------------ Anlegen & Ändern

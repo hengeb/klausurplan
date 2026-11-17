@@ -294,7 +294,7 @@ class AnwesenheitApi
 
     /**
      * Markiert alle Prüflinge als anwesend und zeigt Bestätigungsseite.
-     * Aufruf: GET /anwesenheit/alle-da?token=XXX
+     * Aufruf: POST /anwesenheit/alle-da (Button auf der Eingabeseite, Feld „token“)
      */
     public static function alleDa(string $token): never
     {
@@ -321,8 +321,14 @@ class AnwesenheitApi
     }
 
     /**
-     * Zeigt das Anwesenheits-Eingabeformular (tokenbasiert).
-     * Aufruf: GET /anwesenheit/eingabe?token=XXX
+     * Einzige Seite hinter dem Mail-Link: oben „Alle waren anwesend“ (ein Klick), darunter die
+     * Einzeleingabe der Fehlenden. Speichert selbst **nichts**.
+     * Aufruf: GET /anwesenheit/eingabe?token=XXX (auch alte Mail-Links GET /anwesenheit/alle-da?token=XXX)
+     *
+     * Hintergrund: Link-Scanner von Mail-Sicherheitsfiltern (z.B. Microsoft Defender „Safe Links“)
+     * rufen Links aus Mails automatisch per GET auf. Würde schon das speichern, stünde fälschlich
+     * „alle anwesend“ im Tool und der Cronjob schickte keine Erinnerung mehr. Gespeichert wird
+     * daher nur per POST (Buttons auf dieser Seite).
      */
     public static function eingabeSeite(string $token): never
     {
@@ -334,19 +340,33 @@ class AnwesenheitApi
         $klausur  = self::klausurInfo($db, $klausurId);
         $schueler = self::alleSchuelerFuerKlausur($db, $klausurId);
 
+        // Bereits erfasste Einträge vorbelegen, damit erneutes Speichern nichts versehentlich überschreibt
+        $vorhanden = $db->prepare(
+            "SELECT kurs_schueler_id, status, kommentar FROM anwesenheiten
+             WHERE klausur_id = ? AND status <> 'ausstehend'"
+        );
+        $vorhanden->execute([$klausurId]);
+        $erfasst = [];
+        foreach ($vorhanden->fetchAll() as $a) {
+            $erfasst[(int) $a['kurs_schueler_id']] = $a;
+        }
+
         $zeilen = '';
         foreach ($schueler as $ks) {
+            $id   = (int) $ks['id'];
             $name = $ks['nachname'] !== null
                 ? htmlspecialchars($ks['nachname'] . ', ' . $ks['vorname'])
                 : htmlspecialchars(str_replace('|', ', ', $ks['name_roh']));
+            $fehlt     = ($erfasst[$id]['status'] ?? '') === 'fehlend' ? ' checked' : '';
+            $kommentar = htmlspecialchars((string) ($erfasst[$id]['kommentar'] ?? ''));
 
             $zeilen .= '<tr>
                 <td>' . $name . '</td>
                 <td style="text-align:center">
-                    <input type="checkbox" name="fehlend[]" value="' . $ks['id'] . '">
+                    <input type="checkbox" name="fehlend[]" value="' . $id . '"' . $fehlt . '>
                 </td>
                 <td>
-                    <input type="text" name="kommentar_' . $ks['id'] . '"
+                    <input type="text" name="kommentar_' . $id . '" value="' . $kommentar . '"
                            placeholder="Kommentar (optional)" style="width:100%;max-width:260px;padding:.3rem .5rem;border:1px solid #ccc;border-radius:4px">
                 </td>
             </tr>';
@@ -356,12 +376,27 @@ class AnwesenheitApi
             ? date('d.m.Y', strtotime($klausur['termin_datum']))
             : 'kein Datum';
 
+        $hinweis = $erfasst !== []
+            ? '<p class="hinweis">Für diese Klausur ist bereits eine Anwesenheit eingetragen (unten vorausgefüllt). '
+              . 'Du kannst sie hier ändern.</p>'
+            : '';
+
+        $tokenEsc = htmlspecialchars($token);
         $inhalt = '
             <p>Kurs: <strong>' . htmlspecialchars($klausur['kurs_anzeigename']) . '</strong>
-               &nbsp;|&nbsp; Datum: <strong>' . $datumStr . '</strong></p>
-            <p>Bitte setze einen Haken bei fehlenden Prüflingen:</p>
+               &nbsp;|&nbsp; Datum: <strong>' . $datumStr . '</strong></p>' . $hinweis . '
+            <h3>Waren alle anwesend?</h3>
+            <form method="post" action="/anwesenheit/alle-da">
+                <input type="hidden" name="token" value="' . $tokenEsc . '">
+                <button type="submit"
+                        style="padding:.5rem 1.5rem;background:#27ae60;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:1rem">
+                    Ja, alle waren anwesend
+                </button>
+            </form>
+            <h3 style="margin-top:2rem">Oder: Fehlende einzeln angeben</h3>
+            <p>Setze einen Haken bei fehlenden Prüflingen:</p>
             <form method="post" action="/anwesenheit/token-eintrag">
-                <input type="hidden" name="token" value="' . htmlspecialchars($token) . '">
+                <input type="hidden" name="token" value="' . $tokenEsc . '">
                 <table style="width:100%;border-collapse:collapse">
                     <thead>
                         <tr>

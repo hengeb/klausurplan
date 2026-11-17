@@ -41,11 +41,31 @@ class Mailer
             $mail->isHTML(true);
             $mail->Subject = $subject;
             $mail->Body    = $htmlBody;
-            $mail->AltBody = strip_tags(str_replace(['</p>', '<br>', '<br/>'], "\n", $htmlBody));
+            $mail->AltBody = self::alsText($htmlBody);
 
             $mail->send();
         } catch (MailerException) {
             throw new RuntimeException('E-Mail konnte nicht gesendet werden: ' . $mail->ErrorInfo);
         }
+    }
+
+    /**
+     * Nur-Text-Fassung einer HTML-Mail: Links bleiben als „Text: URL“ erhalten (sonst wären die
+     * Anwesenheits-Links in Textansicht verloren), <head> entfällt, Absätze/Zeilen werden zu Umbrüchen.
+     */
+    public static function alsText(string $html): string
+    {
+        $text = preg_replace('#<head\b.*?</head>#is', '', $html) ?? $html;
+        $text = preg_replace_callback(
+            '#<a\b[^>]*\bhref="([^"]*)"[^>]*>(.*?)</a>#is',
+            fn (array $m): string => trim(strip_tags($m[2])) . ': ' . $m[1],
+            $text
+        ) ?? $text;
+        $text = preg_replace('#<br\s*/?>|</(p|tr|h[1-6]|div)>#i', "\n", $text) ?? $text;
+        $text = str_ireplace('</td>', ' ', $text);
+        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $zeilen = array_map('trim', explode("\n", $text));
+        $text   = preg_replace("/\n{3,}/", "\n\n", implode("\n", $zeilen)) ?? '';
+        return trim($text) . "\n";
     }
 }

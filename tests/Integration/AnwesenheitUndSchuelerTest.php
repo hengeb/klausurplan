@@ -175,6 +175,24 @@ final class AnwesenheitUndSchuelerTest extends IntegrationTestCase
         $this->assertSame(2, $this->fx->zaehle('SELECT COUNT(*) FROM anwesenheiten WHERE klausur_id = ?', [$this->klausur]));
     }
 
+    public function testAufrufDesMailLinksSpeichertNochNichts(): void
+    {
+        // Simuliert einen Link-Scanner: nur der GET-Aufruf, kein Klick auf einen Button
+        $token = $this->token();
+
+        $html = $this->ausgabe(fn () => AnwesenheitApi::eingabeSeite($token));
+
+        $this->assertStringContainsString('Ja, alle waren anwesend', $html);
+        $this->assertSame(0, $this->fx->zaehle('SELECT COUNT(*) FROM anwesenheiten WHERE klausur_id = ?', [$this->klausur]));
+        $this->assertNull($this->fx->wert('SELECT beantwortet_am FROM email_benachrichtigungen WHERE token = ?', [$token]));
+
+        // Bereits erfasst → vorausgefüllt
+        $this->fx->anwesenheit($this->klausur, $this->ksEva, 'fehlend');
+        $html = $this->ausgabe(fn () => AnwesenheitApi::eingabeSeite($token));
+        $this->assertStringContainsString('bereits eine Anwesenheit eingetragen', $html);
+        $this->assertStringContainsString('value="' . $this->ksEva . '" checked', $html);
+    }
+
     public function testUnbekannterTokenAendertNichts(): void
     {
         $html = $this->ausgabe(fn () => AnwesenheitApi::alleDa(str_repeat('a', 64)));
