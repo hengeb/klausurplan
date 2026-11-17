@@ -103,7 +103,7 @@ function renderNav() {
 
     if (hatRolle('admin', 'stufenleitung')) {
         links.push(
-            { hash: 'import',      label: 'GOMSTH-Import' },
+            { hash: 'import',      label: 'Import' },
             { hash: 'zuordnungen', label: 'Zuordnungen' },
             { hash: 'halbjahre',   label: 'Halbjahre & Kurse' },
         );
@@ -149,7 +149,7 @@ async function viewStart(el) {
             ${hatRolle('admin', 'stufenleitung') ? `
             <a href="#import" class="kachel">
                 <span class="kachel-icon">📥</span>
-                <span>GOMSTH importieren</span>
+                <span>Import</span>
             </a>
             <a href="#zuordnungen" class="kachel">
                 <span class="kachel-icon">🔗</span>
@@ -244,7 +244,7 @@ async function zeigeMeineStufenDialog(nachAenderung) {
     }
 
     if (stufen.length === 0) {
-        listeEl.innerHTML = '<p class="hinweis">Es gibt noch keine Stufen. Importiere zuerst eine GOMSTH-Datei.</p>';
+        listeEl.innerHTML = '<p class="hinweis">Es gibt noch keine Stufen. Importiere zuerst die Datei SchuelerLeistungsdaten.dat (Menüpunkt „Import“).</p>';
         return;
     }
 
@@ -283,7 +283,7 @@ async function zeigeMeineStufenDialog(nachAenderung) {
 }
 
 // ---------------------------------------------------------------------------
-// View: GOMSTH-Import
+// View: Import (SchuelerLeistungsdaten.dat aus GOMSTH)
 // ---------------------------------------------------------------------------
 
 async function viewImport(el) {
@@ -293,10 +293,10 @@ async function viewImport(el) {
     }
 
     el.innerHTML = `
-        <h2>GOMSTH-Import</h2>
+        <h2>Import</h2>
         <div class="karte">
             <p>
-                Bitte lade die GOMSTH-Exportdatei (.dat) hoch.
+                Bitte lade die Datei SchuelerLeistungsdaten.dat hoch.
                 Es werden nur klausurrelevante Kursarten importiert
                 (GKS, LK1, LK2, AB3, AB4). GKM und ZK werden übersprungen.
             </p>
@@ -742,13 +742,13 @@ function renderSchuelerZuordnung(sGomsth, sMoodle) {
     return `
         <div class="tabelle-wrapper">
             <p class="tabelle-hinweis">
-                ${sGomsth.length} Schüler*innen aus GOMSTH ohne Moodle-Konto-Zuordnung.
+                ${sGomsth.length} Schüler*innen aus dem Import ohne Moodle-Konto-Zuordnung.
                 Wähle das passende Moodle-Konto aus – die Zuordnung gilt für alle Kurse der Person.
             </p>
             <table class="zuordnungs-tabelle">
                 <thead>
                     <tr>
-                        <th>GOMSTH-Name</th>
+                        <th>Name im Import</th>
                         <th>Stufe(n)</th>
                         <th>Kurse</th>
                         <th>Moodle-Konto</th>
@@ -795,7 +795,7 @@ function renderSchuelerZugeordnet(liste) {
             <table class="zuordnungs-tabelle">
                 <thead>
                     <tr>
-                        <th>GOMSTH-Name</th>
+                        <th>Name im Import</th>
                         <th>Stufe(n)</th>
                         <th>Kurse</th>
                         <th>Moodle-Konto</th>
@@ -956,7 +956,7 @@ function zeigeExterneLehrkraftDialog(vorhandene, kuerzelVorbelegung, nachSpeiche
                 <input type="text" id="ext-nachname" maxlength="100" value="${escHtml(vorhandene?.nachname ?? '')}">
             </div>
             <div class="formular-gruppe">
-                <label for="ext-kuerzel">Kürzel * <span style="font-weight:normal;font-size:.85em">(wie in GOMSTH, z.B. „SZ“)</span></label>
+                <label for="ext-kuerzel">Kürzel * <span style="font-weight:normal;font-size:.85em">(wie in den Leistungsdaten, z.B. „SZ“)</span></label>
                 <input type="text" id="ext-kuerzel" maxlength="20"
                        value="${escHtml(vorhandene?.kuerzel ?? kuerzelVorbelegung ?? '')}"
                        ${bearbeiten ? 'disabled' : ''}>
@@ -1025,7 +1025,7 @@ async function viewHalbjahre(el) {
             <h2>Halbjahre & Kurse</h2>
             ${anlegenBtn ? `<div style="margin-bottom:1rem">${anlegenBtn}</div>` : ''}
             <div class="karte">
-                <p>Noch keine Daten importiert. <a href="#import">GOMSTH-Datei importieren →</a></p>
+                <p>Noch keine Daten importiert. <a href="#import">Leistungsdaten importieren →</a></p>
             </div>`;
         el.querySelector('#btn-hj-anlegen')?.addEventListener('click', () => zeigeHalbjahrAnlegenDialog(el));
         return;
@@ -1948,7 +1948,7 @@ async function ladeKlausurNeuFormular(el, nachSpeichern) {
 
 function renderKlausurNeuFormular(el, kurse, nachSpeichern) {
     if (kurse.length === 0) {
-        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">GOMSTH-Datei importieren →</a></p></div>';
+        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">Leistungsdaten importieren →</a></p></div>';
         return;
     }
 
@@ -2074,7 +2074,7 @@ async function ladePasteImport(el, nachImport) {
     }
 
     if (kurse.length === 0) {
-        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">GOMSTH-Datei importieren →</a></p></div>';
+        el.innerHTML = '<div class="karte"><p>Es sind noch keine Kurse vorhanden. <a href="#import">Leistungsdaten importieren →</a></p></div>';
         return;
     }
 
@@ -2945,7 +2945,7 @@ async function viewAdmin(el) {
         </div>
         <div class="karte">
             <h3>Fächerbezeichnungen</h3>
-            <p>Zuordnung von Fachkürzeln (wie in GOMSTH) zu lesbaren Bezeichnungen.</p>
+            <p>Zuordnung von Fachkürzeln (wie in den Leistungsdaten) zu lesbaren Bezeichnungen.</p>
             <div id="faecher-container"></div>
         </div>
     `;
@@ -3389,7 +3389,7 @@ async function ladeBenutzerAbschnitt(el, { stille = false } = {}) {
                     </div>
                     <p class="hinweis" id="sl-stufen-hinweis" style="${rArr.includes('stufenleitung') ? '' : 'display:none'}">
                         Für welche Stufen eine Stufenleitung zuständig ist, verwaltet sie selbst
-                        (auf der Übersichtsseite unter „Meine Stufen“ und automatisch beim GOMSTH-Import).
+                        (auf der Übersichtsseite unter „Meine Stufen“ und automatisch beim Import).
                     </p>
                     <div class="dialog-aktionen">
                         <button class="btn" id="rollen-speichern">Speichern</button>

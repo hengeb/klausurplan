@@ -146,7 +146,7 @@ class GomsthImporter
         $pflicht = ['Nachname', 'Vorname', 'Fach', 'Fachlehrer', 'Kursart', 'Kurs', 'Jahrgang', 'Abschnitt', 'Jahr'];
         foreach ($pflicht as $feld) {
             if (!array_key_exists($feld, $map)) {
-                throw new RuntimeException("Pflichtfeld '$feld' fehlt in der GOMSTH-Datei.");
+                throw new RuntimeException("Pflichtfeld '$feld' fehlt in der Importdatei.");
             }
         }
 

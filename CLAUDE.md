@@ -131,7 +131,7 @@ eintragen**. Tests: `SchemaMigrationTest`.
 
 ## Kernlogik
 
-**GOMSTH-Import** (`Import/GomsthImporter`): Pipe-getrennt, UTF-8 mit BOM, CRLF. Spalten `Nachname, Vorname, Fach,
+**GOMSTH-Import** (`Import/GomsthImporter`): Im UI heißt er nur „Import“ (das Wort GOMSTH taucht im Frontend nicht auf), die Datei heißt `SchuelerLeistungsdaten.dat`. Pipe-getrennt, UTF-8 mit BOM, CRLF. Spalten `Nachname, Vorname, Fach,
 Fachlehrer, Kursart, Kurs, Jahrgang, Abschnitt, Jahr`. Nur `GKS, LK1, LK2, AB3, AB4` (GKM/ZK übersprungen).
 Legt Stufe/Halbjahr/Kurs/Prüflinge an bzw. aktualisiert; Prüflinge, die nicht mehr in der Datei stehen, werden
 entfernt, **außer** es gibt Anwesenheitsdaten. Anzeigename: „Q2 Sport GK 1 SZ“ aus Kurskürzel + `fach_bezeichnungen`.
