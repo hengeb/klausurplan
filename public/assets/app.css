@@ -626,6 +626,18 @@ main {
     font-size: 0.8125rem;
 }
 
+/* Kurs-Tag als Button (Nachschreibtermine → Anwesenheitsdialog) */
+.klausur-tag-klickbar {
+    border: 1px solid transparent;
+    font-family: inherit;
+    cursor: pointer;
+}
+.klausur-tag-klickbar:hover,
+.klausur-tag-klickbar:focus-visible {
+    border-color: #1a3a5c;
+    text-decoration: underline;
+}
+
 .nt-formular {
     margin-top: 0.75rem;
     padding-top: 0.75rem;
@@ -733,6 +745,7 @@ main {
 .aw-status-voll  { color: #27ae60; font-weight: 600; font-variant-numeric: tabular-nums; }
 .aw-status-fehlt { color: #c0392b; font-weight: 600; font-variant-numeric: tabular-nums; }
 .td-aw-status    { white-space: nowrap; }
+.aw-status-entsch { color: #b9770e; }
 
 /* Entschuldigt-Badge bei Nachschreiber*innen */
 .vk-entsch {

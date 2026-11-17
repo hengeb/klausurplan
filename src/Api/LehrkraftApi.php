@@ -88,6 +88,9 @@ class LehrkraftApi
                      WHERE a.klausur_id = k.id AND a.status != 'ausstehend')          AS anwesenheit_erfasst,
                     (SELECT COUNT(*) FROM anwesenheiten a
                      WHERE a.klausur_id = k.id AND a.status = 'fehlend')              AS anwesenheit_fehlend,
+                    (SELECT COUNT(*) FROM anwesenheiten a
+                     WHERE a.klausur_id = k.id AND a.status = 'fehlend'
+                       AND a.entschuldigt IS NULL)                                    AS entschuldigung_offen,
                     EXISTS (SELECT 1 FROM stufenleitungen sl_e
                             WHERE sl_e.stufe_id = s.id AND sl_e.benutzer_id = ?)      AS ist_eigene_sl
              FROM klausuren k
@@ -435,6 +438,7 @@ class LehrkraftApi
             'SELECT nz.nachschreibtermin_id,
                     k.id              AS klausur_id,
                     k.klausur_nr,
+                    k.termin_datum    AS klausur_datum,
                     kurs.anzeigename  AS kurs_anzeigename,
                     ks.id             AS kurs_schueler_id,
                     ks.name_roh,
@@ -466,6 +470,7 @@ class LehrkraftApi
                 $klausurenMap[$tid][$kid] = [
                     'id'               => $kid,
                     'klausur_nr'       => (int) $row['klausur_nr'],
+                    'termin_datum'     => $row['klausur_datum'], // Datum der ursprünglichen Klausur (für den Anwesenheitsdialog)
                     'kurs_anzeigename' => $row['kurs_anzeigename'],
                     'nachschreiber'    => [],
                 ];

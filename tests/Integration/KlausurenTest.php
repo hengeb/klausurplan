@@ -99,6 +99,7 @@ final class KlausurenTest extends IntegrationTestCase
         $this->assertSame(2, (int) $liste[0]['schueler_anzahl']);
         $this->assertSame(2, (int) $liste[0]['anwesenheit_erfasst'], 'zwei erfasste Einträge');
         $this->assertSame(2, (int) $liste[0]['anwesenheit_fehlend'], 'beide fehlend');
+        $this->assertSame(1, (int) $liste[0]['entschuldigung_offen'], 'nur Eva ist noch nicht entschieden');
     }
 
     // ------------------------------------------------------------------ Anlegen & Ändern
@@ -231,6 +232,7 @@ final class KlausurenTest extends IntegrationTestCase
         $this->assertCount(1, $termine);
         $this->assertSame('2026-12-02', $termine[0]['termin_datum']);
         $this->assertSame(['Schüler|Eva'], array_column($termine[0]['klausuren'][0]['nachschreiber'], 'name_roh'));
+        $this->assertSame('2026-10-06', $termine[0]['klausuren'][0]['termin_datum'], 'Datum der ursprünglichen Klausur');
 
         // Lehrkraft des Kurses sieht ihren Termin
         $this->alsBenutzer($this->lehrer, ['lehrkraft']);

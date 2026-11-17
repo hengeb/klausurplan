@@ -252,3 +252,57 @@ test('Excel-Import zeigt Fehlermeldungen des Servers zeilenweise', async () => {
 
     assert.match(d.querySelector('#paste-ergebnis').textContent, /Zeile 2: Kurs "X" nicht gefunden/);
 });
+
+test('Anwesenheitsspalte: offene Entschuldigungen nur für Admin/Stufenleitung', async () => {
+    const fx = fixtures();
+    fx['GET /klausuren'] = [
+        klausur(1, { schueler_anzahl: 3, anwesenheit_erfasst: 3, anwesenheit_fehlend: 2, entschuldigung_offen: 2 }),
+        klausur(2, { schueler_anzahl: 3, anwesenheit_erfasst: 3, anwesenheit_fehlend: 1, entschuldigung_offen: 0 }),
+    ];
+    const zelle = (d, id) => d.querySelector(`tr[data-klausur-id="${id}"] .td-aw-status`).textContent.replace(/\s+/g, ' ').trim();
+
+    const { d } = await starte('klausuren', SL, fx, { warteMs: 60 });
+    assert.equal(zelle(d, 1), '✗ 2 von 3 gefehlt❔ 2 Entschuldigungen offen');
+    assert.equal(zelle(d, 2), '✗ 1 von 3 gefehlt');
+
+    const { d: d2 } = await starte('klausuren', ['lehrkraft'], fx, { warteMs: 60 });
+    assert.equal(zelle(d2, 1), '✗ 2 von 3 gefehlt', 'Lehrkräfte entschuldigen nicht');
+});
+
+const nachschreibFixtures = () => ({
+    ...fixtures(),
+    'GET /nachschreibtermine': [{
+        id: 7, termin_datum: '2026-11-20', termin_uhrzeit: '14:00:00', bemerkung: null,
+        klausuren: [{ id: 1, klausur_nr: 1, termin_datum: '2026-10-01', kurs_anzeigename: 'Q2 Sport',
+            nachschreiber: [{ kurs_schueler_id: 5, name_roh: 'Muster|Max', vorname: null, nachname: null, entschuldigt: null }] }],
+    }],
+    'GET /anwesenheit/1': [{ kurs_schueler_id: 5, anwesenheit_id: 9, name_roh: 'Muster|Max', status: 'fehlend', kommentar: '', entschuldigt: null }],
+    'POST /anwesenheit/1': { gespeichert: 1 },
+});
+
+test('Nachschreibtermine: Kurs anklicken öffnet den Anwesenheitsdialog, Speichern lädt die Liste neu', async () => {
+    const { d, calls } = await starte('nachschreibtermine', SL, nachschreibFixtures(), { warteMs: 60 });
+
+    const tag = d.querySelector('.btn-nt-klausur-anwesenheit');
+    assert.ok(tag, 'Kurs-Tag ist klickbar');
+    tag.click();
+    await warten();
+
+    const dialog = d.querySelector('.dialog-anwesenheit');
+    assert.ok(dialog);
+    assert.match(dialog.querySelector('.dialog-kursname').textContent, /Q2 Sport\s+– 01\.10\.2026/);
+    assert.ok(dialog.querySelector('.aw-entschuldigt'), 'Entschuldigung auswählbar');
+
+    calls.length = 0;
+    dialog.querySelector('#aw-speichern').click();
+    await warten();
+    assert.ok(calls.some(c => c.startsWith('POST /anwesenheit/1')));
+    assert.ok(calls.some(c => c === 'GET /nachschreibtermine'), 'Liste neu geladen');
+});
+
+test('Nachschreibtermine: für Lehrkräfte bleibt der Kurs ein reines Etikett', async () => {
+    const { d } = await starte('nachschreibtermine', ['lehrkraft'], nachschreibFixtures(), { warteMs: 60 });
+
+    assert.equal(d.querySelector('.btn-nt-klausur-anwesenheit'), null);
+    assert.match(d.querySelector('.klausur-tag').textContent, /Q2 Sport/);
+});

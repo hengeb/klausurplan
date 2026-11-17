@@ -468,11 +468,11 @@ final class LehrkraftApiTest extends TestCase
         $this->alsBenutzer(5, ['lehrkraft']);
         $this->db->onRows('/FROM nachschreibtermine n/', [['id' => 1, 'termin_datum' => '2026-03-01'], ['id' => 2, 'termin_datum' => null]]);
         $this->db->onRows('/FROM nachschreib_zuordnungen nz/', [
-            ['nachschreibtermin_id' => 1, 'klausur_id' => 10, 'klausur_nr' => 1, 'kurs_anzeigename' => 'Q2 Sport', 'kurs_schueler_id' => 100,
+            ['nachschreibtermin_id' => 1, 'klausur_id' => 10, 'klausur_nr' => 1, 'klausur_datum' => '2026-02-10', 'kurs_anzeigename' => 'Q2 Sport', 'kurs_schueler_id' => 100,
              'name_roh' => 'A|B', 'benutzer_id' => 7, 'vorname' => 'B', 'nachname' => 'A', 'entschuldigt' => 1],
-            ['nachschreibtermin_id' => 1, 'klausur_id' => 10, 'klausur_nr' => 1, 'kurs_anzeigename' => 'Q2 Sport', 'kurs_schueler_id' => 101,
+            ['nachschreibtermin_id' => 1, 'klausur_id' => 10, 'klausur_nr' => 1, 'klausur_datum' => '2026-02-10', 'kurs_anzeigename' => 'Q2 Sport', 'kurs_schueler_id' => 101,
              'name_roh' => 'C|D', 'benutzer_id' => null, 'vorname' => null, 'nachname' => null, 'entschuldigt' => null],
-            ['nachschreibtermin_id' => 1, 'klausur_id' => 11, 'klausur_nr' => 2, 'kurs_anzeigename' => 'Q2 Mathe', 'kurs_schueler_id' => null,
+            ['nachschreibtermin_id' => 1, 'klausur_id' => 11, 'klausur_nr' => 2, 'klausur_datum' => null, 'kurs_anzeigename' => 'Q2 Mathe', 'kurs_schueler_id' => null,
              'name_roh' => null, 'benutzer_id' => null, 'vorname' => null, 'nachname' => null, 'entschuldigt' => null],
         ]);
 
@@ -482,6 +482,7 @@ final class LehrkraftApiTest extends TestCase
         $this->assertCount(2, $termine[0]['klausuren'][0]['nachschreiber']);
         $this->assertSame([], $termine[0]['klausuren'][1]['nachschreiber'], 'Klausur ohne Fehlende');
         $this->assertSame(2, $termine[0]['klausuren'][1]['klausur_nr']);
+        $this->assertSame('2026-02-10', $termine[0]['klausuren'][0]['termin_datum'], 'Datum der ursprünglichen Klausur');
         $this->assertSame([], $termine[1]['klausuren'], 'Termin ohne Verknüpfung');
     }
 

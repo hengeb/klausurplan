@@ -39,7 +39,7 @@ DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [R
   nie lesen, ausgeben oder in Tests verwenden.**
 - **Neuer/geänderter Code bekommt Tests.** Unit-Tests prüfen Logik und *welche* Statements gesendet werden;
   ob das SQL stimmt, prüfen nur die Integrationstests → SQL-Änderungen immer dort absichern.
-- Stand: 348 PHP-Unit-, 95 Integrations-, 39 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
+- Stand: 348 PHP-Unit-, 95 Integrations-, 42 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
   ≈ 99,85 % (offen nur `exit`, private Konstruktoren). Nicht abgedeckt: `public/*.php`-Einstiegsskripte, `setup.php`, `bin/`.
 - Test-Nahtstellen im Produktivcode (nicht entfernen): `Support\Prozess::beenden()` statt `exit`,
   `Database::setInstance()`, `Router::jsonBody($roh)`, `MoodleApi::alleNutzer()/get()` (protected).
@@ -160,7 +160,11 @@ Klausur ohne Datum → füllen; sonst neu. Undatierte Klausuren stehen unter den
 wechselt „Zur Übersicht“ per Button auf den Übersicht-Tab (kein `#klausuren`-Link – gleicher Hash löst kein Routing aus).
 Anwesenheitsspalte der Übersicht (`renderAnwesenheitStatus(k)`, API liefert `anwesenheit_erfasst` und
 `anwesenheit_fehlend`): „–“ (noch nicht fällig, gleiche 12-Uhr-Regel wie der Cron) · „⏳ Rückmeldung fehlt“ ·
-„⏳ x von n offen“ · „✓ alle anwesend“ · „✗ x von n gefehlt“.
+„⏳ x von n offen“ · „✓ alle anwesend“ · „✗ x von n gefehlt“; für Admin/Stufenleitung darunter klein
+„❔ x Entschuldigung(en) offen“ (`entschuldigung_offen` = fehlend mit `entschuldigt IS NULL`). Bei den
+Nachschreibterminen sind die Kurs-Tags für Admin/Stufenleitung Buttons, die denselben Anwesenheitsdialog der
+ursprünglichen Klausur öffnen (`zeigeAnwesenheitDialog(k, nachSpeichern)`; die API liefert dafür je Klausur
+`termin_datum` der Originalklausur); nach dem Speichern wird die Liste neu geladen.
 
 **E-Mail** (`Cron/cron_script.php`, stündlich; `Mail/`): Erstmeldung an die Fachlehrkraft, sobald der
 Klausurtermin (Datum+Uhrzeit; **ohne Uhrzeit gilt 12 Uhr**, ohne Datum nie) vergangen ist; solange danach keine Anwesenheit erfasst ist (egal ob per Mail-Link

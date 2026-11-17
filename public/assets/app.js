@@ -2218,7 +2218,8 @@ function parsePasteVorschau(text, vorschauEl, nachImport, holeHalbjahrId) {
 // Anwesenheits-Dialog
 // ---------------------------------------------------------------------------
 
-async function zeigeAnwesenheitDialog(klausur) {
+/** nachSpeichern: optional, wird nach erfolgreichem Speichern aufgerufen (z.B. Liste neu laden). */
+async function zeigeAnwesenheitDialog(klausur, nachSpeichern = null) {
     const overlay = document.createElement('div');
     overlay.className = 'dialog-overlay';
     overlay.innerHTML = `
@@ -2385,10 +2386,12 @@ async function zeigeAnwesenheitDialog(klausur) {
             klausur.schueler_anzahl     = werte.length;
             klausur.anwesenheit_erfasst = werte.filter(s => s.status !== 'ausstehend').length;
             klausur.anwesenheit_fehlend = werte.filter(s => s.status === 'fehlend').length;
+            klausur.entschuldigung_offen = werte.filter(s => s.status === 'fehlend' && s.entschuldigt === null).length;
             const tr = document.querySelector(`tr[data-klausur-id="${klausur.id}"]`);
             if (tr) {
                 tr.querySelector('.td-aw-status').innerHTML = renderAnwesenheitStatus(klausur);
             }
+            nachSpeichern?.();
         } catch (err) {
             fehlerEl.textContent  = err.message;
             fehlerEl.style.display = '';
@@ -2571,6 +2574,15 @@ function renderNachschreibtermineList(el, termine) {
             if (t) zeigeNachschreibAnwesenheitDialog(t);
         });
     });
+
+    // Kurs-Tag → Anwesenheitsdialog der ursprünglichen Klausur; nach dem Speichern Liste neu laden
+    el.querySelectorAll('.btn-nt-klausur-anwesenheit').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const kid = parseInt(btn.dataset.klausurId);
+            const k   = termine.flatMap(t => t.klausuren).find(x => x.id === kid);
+            if (k) zeigeAnwesenheitDialog(k, () => ladeNachschreibtermine(el));
+        });
+    });
 }
 
 /** Gibt ein Badge für den Entschuldigungsstatus zurück. */
@@ -2592,7 +2604,13 @@ function renderNachschreibKlausurBlock(k) {
         }).join('');
         nsHtml = `<ul class="nt-ns-liste">${items}</ul>`;
     }
-    return `<div class="nt-klausur-block"><span class="klausur-tag">${escHtml(k.kurs_anzeigename)}</span>${nsHtml}</div>`;
+    // Admin/Stufenleitung: Kurs anklickbar → Anwesenheitsdialog der Klausur (z.B. Entschuldigungen nachtragen)
+    const nr  = k.klausur_nr > 1 ? ` (Nr. ${k.klausur_nr})` : '';
+    const tag = hatRolle('admin', 'stufenleitung')
+        ? `<button type="button" class="klausur-tag klausur-tag-klickbar btn-nt-klausur-anwesenheit" data-klausur-id="${k.id}"
+                   title="Anwesenheit und Entschuldigungen bearbeiten">${escHtml(k.kurs_anzeigename)}${nr}</button>`
+        : `<span class="klausur-tag">${escHtml(k.kurs_anzeigename)}${nr}</span>`;
+    return `<div class="nt-klausur-block">${tag}${nsHtml}</div>`;
 }
 
 function renderNachschreibterminFormular(el, vorhandener, nachSpeichern) {
@@ -2816,8 +2834,13 @@ function renderAnwesenheitStatus(k) {
     const fehlend = parseInt(k.anwesenheit_fehlend) || 0;
     if (gesamt === 0) return '<span class="aw-status-offen">–</span>';
 
+    // Offene Entschuldigungen nur für die, die entschuldigen dürfen (Admin/Stufenleitung)
+    const entschOffen = hatRolle('admin', 'stufenleitung') ? (parseInt(k.entschuldigung_offen) || 0) : 0;
+    const entschText  = entschOffen > 0
+        ? `<br><small class="aw-status-entsch" title="Für ${entschOffen} fehlende Prüflinge ist noch nicht entschieden, ob entschuldigt">❔ ${entschOffen} ${entschOffen === 1 ? 'Entschuldigung' : 'Entschuldigungen'} offen</small>`
+        : '';
     const fehltText = fehlend > 0
-        ? `<span class="aw-status-fehlt" title="${fehlend} von ${gesamt} Prüflingen haben gefehlt">✗ ${fehlend} von ${gesamt} gefehlt</span>`
+        ? `<span class="aw-status-fehlt" title="${fehlend} von ${gesamt} Prüflingen haben gefehlt">✗ ${fehlend} von ${gesamt} gefehlt</span>${entschText}`
         : '';
 
     if (erfasst >= gesamt) {
