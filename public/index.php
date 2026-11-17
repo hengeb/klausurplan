@@ -34,7 +34,7 @@ if ($path === '/anwesenheit/token-eintrag' && $_SERVER['REQUEST_METHOD'] === 'PO
 // ------------------------------------------------------------------
 // Authentifizierte Seiten
 // ------------------------------------------------------------------
-Session::start();
+Session::start(nurLesen: true);
 
 // CSP senden – überschreibt ggf. eine restriktivere Server-Policy
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'self' https://moodle.gymnasium-broich.de");

@@ -19,7 +19,7 @@ const warten = (ms = 30) => new Promise(r => setTimeout(r, ms));
  * @param {Record<string, any>} fixtures  "METHODE /pfad" (Präfix mit * am Ende) → Antwort oder Funktion(options)
  * @returns {Promise<{w: Window, d: Document, calls: string[]}>}  calls = alle API-Aufrufe ("GET /pfad", "POST /pfad {body}")
  */
-async function starte(hash, rollen, fixtures, { warteMs = 30, meId = 2 } = {}) {
+async function starte(hash, rollen, fixtures, { warteMs = 30, meId = 2, me = undefined } = {}) {
     const calls = [];
     const dom = new JSDOM('<!DOCTYPE html><nav id="nav"></nav><main id="app"></main>', {
         runScripts: 'outside-only',
@@ -42,6 +42,7 @@ async function starte(hash, rollen, fixtures, { warteMs = 30, meId = 2 } = {}) {
     };
     w.KLAUSURPLAN_ROLLEN = rollen;
     w.KLAUSURPLAN_ME_ID = meId;
+    if (me !== undefined) w.KLAUSURPLAN_ME = me; // von layout.php eingebettete /me-Daten
     w.confirm = () => true;
     w.alert = m => calls.push('ALERT ' + m);
     w.scrollTo = () => {};

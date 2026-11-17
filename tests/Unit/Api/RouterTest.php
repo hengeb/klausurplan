@@ -221,4 +221,14 @@ final class RouterTest extends TestCase
         $this->assertSame(400, http_response_code());
         $this->assertSame(['fehler' => 'Ungültiger JSON-Body'], json_decode($json, true));
     }
+
+    public function testServerTimingNenntGesamtzeitVerbindungUndFachlogik(): void
+    {
+        $this->assertSame(
+            'gesamt;desc="PHP gesamt";dur=120.5, db-verbindung;desc="DB-Verbindung";dur=30.0, handler;desc="Fachlogik + SQL";dur=50.0',
+            Router::serverTimingWert(80.0, 30.0, 120.46)
+        );
+        $this->assertSame('handler;desc="Fachlogik + SQL";dur=4.2', Router::serverTimingWert(4.2, null, null), 'ohne DB und Startzeit');
+        $this->assertStringEndsWith('dur=0.0', Router::serverTimingWert(1.0, 5.0, null), 'nie negativ');
+    }
 }

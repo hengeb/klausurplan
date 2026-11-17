@@ -11,7 +11,17 @@ class Session
 {
     private static bool $started = false;
 
-    public static function start(): void
+    /**
+     * Startet die PHP-Session.
+     *
+     * $nurLesen = true (API, Seitenaufruf): Die Session wird sofort wieder geschlossen. PHP sperrt die
+     * Session-Datei sonst bis zum Ende der Anfrage, sodass parallele API-Anfragen desselben Browsers
+     * nacheinander statt gleichzeitig laufen. $_SESSION bleibt lesbar. Bewusst nicht
+     * `read_and_close`: session_write_close() erneuert den Zeitstempel der Session-Datei, sonst
+     * räumte die Garbage-Collection aktive Sitzungen nach session.gc_maxlifetime ab.
+     * Nur der LTI-Launch schreibt in die Session und startet sie deshalb normal.
+     */
+    public static function start(bool $nurLesen = false): void
     {
         if (self::$started) {
             return;
@@ -27,6 +37,9 @@ class Session
                 'samesite' => 'Lax',
             ]);
             session_start();
+            if ($nurLesen) {
+                session_write_close();
+            }
         }
 
         self::$started = true;

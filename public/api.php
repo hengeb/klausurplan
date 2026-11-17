@@ -18,7 +18,7 @@ $dotenv->load();
 
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'self' https://moodle.gymnasium-broich.de");
 
-Session::start();
+Session::start(nurLesen: true);
 
 $router = new Router();
 

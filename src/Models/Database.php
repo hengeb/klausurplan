@@ -12,6 +12,14 @@ class Database
 {
     private static ?PDO $instance = null;
 
+    /** Dauer des Verbindungsaufbaus in ms (für den Server-Timing-Header); null = keine Verbindung aufgebaut. */
+    private static ?float $verbindungsdauerMs = null;
+
+    public static function verbindungsdauerMs(): ?float
+    {
+        return self::$verbindungsdauerMs;
+    }
+
     private function __construct() {}
     private function __clone() {}
 
@@ -39,6 +47,7 @@ class Database
 
         $dsn = "mysql:host={$host};dbname={$name};charset=utf8mb4";
 
+        $beginn = hrtime(true);
         try {
             $pdo = new PDO($dsn, $user, $pass, [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -48,6 +57,7 @@ class Database
         } catch (PDOException $e) {
             throw new RuntimeException('Datenbankverbindung fehlgeschlagen: ' . $e->getMessage(), 0, $e);
         }
+        self::$verbindungsdauerMs = (hrtime(true) - $beginn) / 1e6;
 
         return $pdo;
     }

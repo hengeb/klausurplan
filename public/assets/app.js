@@ -6,7 +6,18 @@
 
 const rollen = window.KLAUSURPLAN_ROLLEN ?? [];
 
+// Daten von GET /me (Name, Rollen, eigene Stufen): beim Seitenaufruf von layout.php eingebettet,
+// damit die Übersichten keine zusätzliche Anfrage brauchen. Jede ändernde Anfrage (nicht GET)
+// verwirft den Zwischenstand – z.B. „Meine Stufen“ oder GOMSTH-Import ändern die Stufen.
+let meCache = window.KLAUSURPLAN_ME ?? null;
+
+async function holeMe() {
+    if (!meCache) meCache = await apiFetch('/me');
+    return meCache;
+}
+
 async function apiFetch(path, options = {}) {
+    if ((options.method ?? 'GET') !== 'GET') meCache = null;
     const isDateiUpload = options.body instanceof FormData;
     const headers = isDateiUpload ? {} : { 'Content-Type': 'application/json', ...(options.headers ?? {}) };
 
@@ -113,7 +124,7 @@ function renderNav() {
 // ---------------------------------------------------------------------------
 
 async function viewStart(el) {
-    const me = await apiFetch('/me');
+    const me = await holeMe();
     el.innerHTML = `
         <div class="karte">
             <h2>Willkommen, ${me.vorname} ${me.nachname}</h2>
@@ -1639,7 +1650,7 @@ async function ladeKlausurenUebersicht(el) {
         const [klausuren, nachschreibtermine, me] = await Promise.all([
             apiFetch('/klausuren' + (istSL && klausurenAlleStufen ? '?alle=1' : '')),
             nurLehrkraft ? apiFetch('/klausuren/meine-nachschreibtermine') : null,
-            istSL ? apiFetch('/me') : null,
+            istSL ? holeMe() : null,
         ]);
         renderKlausurenUebersicht(el, klausuren, nachschreibtermine ?? [], me);
     } catch (err) {

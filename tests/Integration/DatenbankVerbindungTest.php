@@ -37,6 +37,7 @@ final class DatenbankVerbindungTest extends IntegrationTestCase
         $this->assertSame(PDO::FETCH_ASSOC, $pdo->getAttribute(PDO::ATTR_DEFAULT_FETCH_MODE));
         $this->assertSame('1', (string) $pdo->query('SELECT 1')->fetchColumn());
         $this->assertSame($pdo, Database::getInstance(), 'Singleton');
+        $this->assertGreaterThan(0.0, Database::verbindungsdauerMs(), 'Dauer des Verbindungsaufbaus für Server-Timing');
     }
 
     public function testFalschesPasswortWirdAlsRuntimeExceptionGemeldet(): void

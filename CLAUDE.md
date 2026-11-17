@@ -39,7 +39,7 @@ DSGVO-konform (kein CDN, keine Analytics). Installation/Update für Menschen: [R
   nie lesen, ausgeben oder in Tests verwenden.**
 - **Neuer/geänderter Code bekommt Tests.** Unit-Tests prüfen Logik und *welche* Statements gesendet werden;
   ob das SQL stimmt, prüfen nur die Integrationstests → SQL-Änderungen immer dort absichern.
-- Stand: 348 PHP-Unit-, 95 Integrations-, 42 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
+- Stand: 352 PHP-Unit-, 95 Integrations-, 43 JS-Tests. Zeilenabdeckung von `src/`: Unit allein ≈ 99,0 %, Unit + Integration
   ≈ 99,85 % (offen nur `exit`, private Konstruktoren). Nicht abgedeckt: `public/*.php`-Einstiegsskripte, `setup.php`, `bin/`.
 - Test-Nahtstellen im Produktivcode (nicht entfernen): `Support\Prozess::beenden()` statt `exit`,
   `Database::setInstance()`, `Router::jsonBody($roh)`, `MoodleApi::alleNutzer()/get()` (protected).
@@ -208,11 +208,19 @@ Eine Datei, Hash-Routing (`VIEWS`), `apiFetch('/pfad')` (JSON, wirft `Error` mit
 `.dialog-overlay` (`schliessbar()`), Rollen über `hatRolle()`. **Immer `escHtml()`** für Daten in `innerHTML`.
 Zuordnungs-Ansicht lädt nach jeder Änderung neu (`ladeZuordnungen`) und behält Tab/Filter (`zuordnungenZustand`).
 CSS in `app.css` (funktional, eigenes Design, keine Frameworks).
+`/me`-Daten (Name, Rollen, eigene Stufen) bettet `layout.php` als `window.KLAUSURPLAN_ME` ein; das Frontend holt sie
+über `holeMe()` (Zwischenspeicher `meCache`, jede nicht-GET-Anfrage in `apiFetch` verwirft ihn) – spart beim
+Seitenaufbau eine Anfrage. Jede API-Antwort trägt einen `Server-Timing`-Header (gesamt / db-verbindung / handler),
+sichtbar in den Browser-Entwicklertools (Netzwerk → Timing) – zur Diagnose von Ladezeiten auf dem Server.
 
 ## Sicherheit & Datenschutz
 
 - Prepared Statements; Ausgaben escapen (HTML-Token-Seiten mit `htmlspecialchars`, JSON im Frontend mit `escHtml`).
 - Session: PHP-Sessions (`klausurplan_session`, httponly, SameSite=Lax), `session_regenerate_id()` nach Login.
+  `api.php`/`index.php` starten sie mit `Session::start(nurLesen: true)` (= `session_start()` + sofort
+  `session_write_close()`), damit parallele API-Anfragen nicht an der Session-Sperre hintereinander warten; bewusst
+  nicht `read_and_close`, weil sonst der Zeitstempel nicht erneuert wird und die GC aktive Sitzungen löscht. Nur
+  `lti-launch.php` schreibt in die Session (normaler Start). **Neue API-Routen dürfen nichts in `$_SESSION` schreiben.**
 - Schüler*innen sehen nur eigene Daten (`SchuelerApi` fragt ausschließlich mit der eigenen ID ab).
 - CSP über `.htaccess`/`api.php`/`index.php` (nur `'self'`, Frame-Ancestors Moodle). Kein Zugriffs-Log, aber PHP-Error-Log aktiv.
 - Halbjahre samt Klausuren löschbar (CASCADE). `.env`, `*.key`, `vendor/` nie committen (`.gitignore`).

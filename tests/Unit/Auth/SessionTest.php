@@ -32,6 +32,25 @@ final class SessionTest extends TestCase
         $this->assertSame($id, session_id());
     }
 
+    public function testNurLesenGibtDieSessionSofortFreiDatenBleibenLesbar(): void
+    {
+        // Ohne Freigabe würden parallele API-Anfragen an der Session-Sperre nacheinander warten
+        ini_set('session.save_path', sys_get_temp_dir());
+        session_name('klausurplan_session');
+        session_start();
+        $_SESSION['benutzer_id'] = 9;
+        $id = session_id();
+        session_write_close();
+        $_SESSION = [];
+
+        session_id($id);
+        Session::start(nurLesen: true);
+
+        $this->assertSame(PHP_SESSION_NONE, session_status(), 'Sperre sofort freigegeben');
+        $this->assertSame(9, $_SESSION['benutzer_id'], 'Sitzungsdaten bleiben lesbar');
+        $this->assertSame($id, session_id());
+    }
+
     public function testSetBenutzerSchreibtDieSitzungsdatenUndErneuertDieSessionId(): void
     {
         ini_set('session.save_path', sys_get_temp_dir());

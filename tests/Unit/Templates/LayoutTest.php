@@ -39,4 +39,33 @@ final class LayoutTest extends TestCase
         $this->assertStringNotContainsString('<header>', $html);
         $this->assertStringContainsString('<main id="app">', $html);
     }
+
+    public function testMeDatenWerdenEingebettetUndSicherKodiert(): void
+    {
+        $this->alsBenutzer(7, ['stufenleitung'], 'Anna', '</script><b>');
+        $this->db->onRows('/FROM stufenleitungen sl/', [['id' => 3, 'name' => 'Q1', 'schuljahr' => '2026/2027']]);
+
+        $html = $this->rendere();
+
+        $this->assertStringContainsString('window.KLAUSURPLAN_ME     = {"id":7,', $html);
+        $this->assertStringContainsString('"stufen":[{"id":3,"name":"Q1","schuljahr":"2026\/2027"}]};', $html);
+        $this->assertStringContainsString('\u003C\/script\u003E\u003Cb\u003E', $html, 'kein </script> aus Nutzerdaten im Skriptblock');
+        $this->assertSame(1, substr_count($html, '</script>') - 1, 'nur die eigenen Script-Tags werden geschlossen');
+    }
+
+    public function testOhneDatenbankBleibtMeDatenLeer(): void
+    {
+        $this->alsBenutzer(7, ['stufenleitung']);
+        $this->db->on('/FROM stufenleitungen/', fn () => throw new \PDOException('weg'));
+        $altesLog = ini_set('error_log', tempnam(sys_get_temp_dir(), 'kp-log'));
+
+        try {
+            $html = $this->rendere();
+        } finally {
+            ini_set('error_log', (string) $altesLog);
+        }
+
+        $this->assertStringContainsString('window.KLAUSURPLAN_ME     = null;', $html, 'Seite lädt trotzdem, das Frontend holt /me selbst');
+        $this->assertStringContainsString('<main id="app">', $html);
+    }
 }

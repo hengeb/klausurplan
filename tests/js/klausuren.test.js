@@ -306,3 +306,21 @@ test('Nachschreibtermine: für Lehrkräfte bleibt der Kurs ein reines Etikett', 
     assert.equal(d.querySelector('.btn-nt-klausur-anwesenheit'), null);
     assert.match(d.querySelector('.klausur-tag').textContent, /Q2 Sport/);
 });
+
+test('Eingebettete /me-Daten ersparen die Anfrage; nach einer Änderung wird neu geladen', async () => {
+    const fx = fixtures();
+    const me = fx['GET /me'];
+    const { d, calls } = await starte('klausuren', SL, fx, { warteMs: 60, me });
+
+    assert.ok(!calls.includes('GET /me'), 'keine /me-Anfrage beim Seitenaufbau');
+    assert.ok(calls.includes('GET /klausuren'));
+    assert.match(d.querySelector('.filter-leiste').textContent, /Q2/, 'Stufen aus den eingebetteten Daten');
+
+    // Ändernde Anfrage (hier: Klausur löschen) verwirft den Zwischenstand → nächste Übersicht holt /me neu
+    d.querySelector('.btn-klausur-loeschen').click();
+    await warten();
+    calls.length = 0;
+    d.querySelector('#kl-alle-stufen').click();
+    await warten();
+    assert.ok(calls.includes('GET /me'));
+});
